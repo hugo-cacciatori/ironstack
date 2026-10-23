@@ -91,7 +91,7 @@ void stateTests()
     restoreXml(source, "<IronstackState/>");
     require(changes.pageChanges == 1 && !source.isGuitarPageSelected(), "recall restores page without marking project dirty");
     source.removeListener(&changes);
-    require(source.getParameters().size() == 6, "three continuous controls plus enables/Mono are exposed");
+    require(source.getParameters().size() == 8, "levels, enables, output and three compatibility IDs exist");
     for (const auto* retired : {"bass_mute", "guitar_mute", "play_mode"})
         require(source.parameterState().getParameter(retired) == nullptr, "no conflicting mute or mode parameter");
     require(toggle(source, ironstack::parameters::bassEnabled) && toggle(source, ironstack::parameters::guitarEnabled)
@@ -104,12 +104,12 @@ void stateTests()
         for (const auto normalised : {0.0f, 0.1234567f, 0.5f, 0.9876543f, 1.0f})
         {
             parameter->setValueNotifyingHost(normalised);
-            const auto expected = source.parameterState().getRawParameterValue(id)->load();
+            const auto expected = juce::String(id) == ironstack::parameters::crossover ? 140.0f : 0.5f;
             juce::MemoryBlock bytes;
             source.getStateInformation(bytes);
             destination.setStateInformation(bytes.getData(), static_cast<int>(bytes.getSize()));
             require(destination.parameterState().getRawParameterValue(id)->load() == expected,
-                    "new bass parameters round-trip exactly at boundaries and fractional values");
+                    "retired voice parameters migrate to fixed production defaults");
         }
     }
     for (const float value : {-12.0f, -9.876543f, -6.0f, 0.0f, 1.234567f, 6.0f})
@@ -136,9 +136,9 @@ void stateTests()
         destination.setStateInformation(saved.getData(), static_cast<int>(saved.getSize()));
         destination.getStateInformation(repeated);
         require(destination.isGuitarPageSelected() == source.isGuitarPageSelected(), "selected page restores independently");
-        for (const auto* id : {ironstack::parameters::bassEnabled, ironstack::parameters::guitarEnabled, ironstack::parameters::guitarMono})
+        for (const auto* id : {ironstack::parameters::bassEnabled, ironstack::parameters::guitarEnabled})
             require(toggle(source, id) == toggle(destination, id), "all boolean values restore exactly");
-        for (const auto* id : {ironstack::parameters::output, ironstack::parameters::crossover, ironstack::parameters::destruction})
+        for (const auto* id : {ironstack::parameters::output, ironstack::parameters::bassVolume, ironstack::parameters::guitarVolume})
             require(source.parameterState().getRawParameterValue(id)->load() == destination.parameterState().getRawParameterValue(id)->load(),
                     "disabled-page sound settings restore exactly");
         source.setStateInformation(repeated.getData(), static_cast<int>(repeated.getSize()));
@@ -194,7 +194,10 @@ void stateTests()
     const auto recalled = outputDb(destination);
     std::locale::global(previousLocale);
     require(recalled == -3.25f, "state decimals are independent of the host C++ locale");
-    std::cout << "state_round_trips=6 exact; malformed/future/legacy checks passed\n";
+    for (const auto* id : {ironstack::parameters::crossover, ironstack::parameters::destruction, ironstack::parameters::guitarMono})
+        require(!source.parameterState().getParameter(id)->isAutomatable(), "retired voice controls are not automatable");
+    require(!toggle(destination, ironstack::parameters::guitarMono), "old Mono cannot restore centering");
+    std::cout << "state round-trips, fixed voice migration and malformed/legacy checks passed\n";
 }
 
 void processorTests()
@@ -286,8 +289,7 @@ void headlessParityTests()
             core.setOutputDb(outputDb(processor)); // Use the exact APVTS-normalised value.
             for (const auto* id : {ironstack::parameters::crossover, ironstack::parameters::destruction})
                 processor.parameterState().getParameter(id)->setValueNotifyingHost(static_cast<float>(index % 3) * 0.5f);
-            core.setBassParameters(processor.parameterState().getRawParameterValue(ironstack::parameters::crossover)->load(),
-                                   processor.parameterState().getRawParameterValue(ironstack::parameters::destruction)->load());
+            core.setBassParameters(140.0f, 0.5f);
             auto hostMidi = midi;
             processor.processBlock(host, hostMidi);
             ironstack::processMidiBlock(core, offline, midi);
@@ -296,6 +298,20 @@ void headlessParityTests()
                     require(host.getSample(channel, sample) == offline.getSample(channel, sample),
                             "headless core exactly matches plugin MIDI/gain across changing blocks");
         }
+    }
+    // Fixed voicing ignores stale automation while real level automation stays live.
+    IronstackProcessor actual, neutral;
+    for (auto* processor : {&actual, &neutral}) processor->prepareToPlay(48000, 512);
+    for (int block = 0; block < 12; ++block)
+    {
+        for (const auto* id : {ironstack::parameters::crossover, ironstack::parameters::destruction, ironstack::parameters::guitarMono})
+            actual.parameterState().getParameter(id)->setValueNotifyingHost(block % 2 ? 0.0f : 1.0f);
+        juce::AudioBuffer<float> a(2, 512), b(2, 512);
+        juce::MidiBuffer ma, mb;
+        if (block == 0) ma.addEvent(juce::MidiMessage::noteOn(1, 52, static_cast<juce::uint8>(127)), 0);
+        mb = ma; actual.processBlock(a, ma); neutral.processBlock(b, mb);
+        for (int channel = 0; channel < 2; ++channel) for (int i = 0; i < 512; ++i)
+            require(a.getSample(channel, i) == b.getSample(channel, i), "retired parameters cannot change production audio");
     }
     std::cout << "headless_plugin_sample_parity=exact\n";
 }
@@ -313,7 +329,7 @@ void routingBridgeTests()
         setToggle(processor, ironstack::parameters::guitarMono, mono);
         processor.prepareToPlay(rate, 512);
         reference.setLayersEnabled(bassOn, guitarOn);
-        reference.prepare(rate, 0.0f, 140.0f, 0.5f, mono);
+        reference.prepare(rate);
         juce::MemoryBlock saved;
         processor.getStateInformation(saved);
         int index = 0;
@@ -325,19 +341,19 @@ void routingBridgeTests()
                 setToggle(processor, ironstack::parameters::guitarEnabled, !guitarOn);
                 setToggle(processor, ironstack::parameters::guitarMono, !mono);
                 reference.setLayersEnabled(!bassOn, !guitarOn);
-                reference.setGuitarMono(!mono);
+                reference.setGuitarMono(false);
             }
             if (index == 4)
             {
                 // Restore through the real host state path while keys are held.
                 processor.setStateInformation(saved.getData(), static_cast<int>(saved.getSize()));
                 reference.setLayersEnabled(bassOn, guitarOn);
-                reference.setGuitarMono(mono);
+                reference.setGuitarMono(false);
             }
             if (index == 5)
             {
                 processor.reset();
-                reference.reset(0.0f, 140.0f, 0.5f, mono);
+                reference.reset(0.0f);
             }
             if (index == 6) { processor.requestPanic(); reference.panic(); }
             processor.selectGuitarPage(index % 2 != 0); // Page has no sound counterpart.
@@ -367,12 +383,12 @@ void routingBridgeTests()
             ++index;
         }
     }
-    // A never-configured Engine retains the previously accepted locked-bass
-    // diagnostic policy. Explicit host Bass mode must preserve those samples.
+    // Host solo mode must match the explicit newest-note routing policy.
     IronstackProcessor bassProcessor;
     setToggle(bassProcessor, ironstack::parameters::guitarEnabled, false);
     bassProcessor.prepareToPlay(48000.0, 512);
     ironstack::Engine legacy;
+    legacy.setLayersEnabled(true, false);
     legacy.prepare(48000.0);
     juce::AudioBuffer<float> bassAudio(2, 512), legacyAudio(2, 512);
     for (const auto& message : {juce::MidiMessage::noteOn(1, 69, static_cast<juce::uint8>(127)),
@@ -387,7 +403,7 @@ void routingBridgeTests()
         for (int sample = 0; sample < 512; ++sample)
             require(bassAudio.getSample(0, sample) == legacyAudio.getSample(0, sample)
                     && bassAudio.getSample(0, sample) == bassAudio.getSample(1, sample),
-                    "explicit host Bass preserves accepted locked-bass samples, including overlap/handover");
+                    "explicit host solo uses newest-note samples, including overlap/handover");
     }
     std::cout << "host_routing_matrix=48 rate/mode/Mono cases; live automation/held recall/page/reset/panic exact\n";
 }
@@ -396,227 +412,130 @@ void editorTests(const juce::String& snapshot)
 {
     IronstackProcessor processor;
     std::unique_ptr<juce::AudioProcessorEditor> editor(processor.createEditor());
-    require(editor && editor->getWidth() == 680 && editor->getHeight() == 480, "usable resizable editor dimensions");
-    editor->addToDesktop(0); // Native accessibility handlers require a window peer.
-    juce::Slider* slider = nullptr;
-    juce::TextButton* button = nullptr;
-    for (auto* child : editor->getChildren())
-    {
-        require(editor->getLocalBounds().contains(child->getBounds()), "editor controls fit inside its bounds");
-        if (auto* candidate = dynamic_cast<juce::Slider*>(child))
-            if (candidate->getTitle() == "Output gain") slider = candidate;
-        if (auto* candidate = dynamic_cast<juce::TextButton*>(child))
-            if (candidate->getButtonText() == "Panic") button = candidate;
-    }
-    require(slider && button, "Output and Panic controls exist");
-    LayerTab* bassTab = nullptr;
-    LayerTab* guitarTab = nullptr;
-    juce::ToggleButton* bassPower = nullptr;
-    juce::ToggleButton* guitarPower = nullptr;
-    juce::ToggleButton* mono = nullptr;
-    juce::Label* mode = nullptr;
+    require(editor && editor->getWidth() == 680 && editor->getHeight() == 400, "compact resizable editor");
+    editor->addToDesktop(0);
+    editor->setVisible(true);
+    editor->toFront(true);
+    LayerTab *foundation = nullptr, *swarm = nullptr;
+    NumericKnob *output = nullptr, *foundationLevel = nullptr, *swarmLevel = nullptr;
+    juce::TextButton* panic = nullptr;
+    juce::Label* footer = nullptr;
     for (auto* child : editor->getChildren())
     {
         if (auto* tab = dynamic_cast<LayerTab*>(child))
-            (tab->getButtonText() == "Bass" ? bassTab : guitarTab) = tab;
-        if (auto* power = dynamic_cast<juce::ToggleButton*>(child))
-        {
-            if (power->getButtonText() == "Bass on") bassPower = power;
-            if (power->getButtonText() == "Guitars on") guitarPower = power;
-            if (power->getButtonText() == "Guitar Mono") mono = power;
-        }
-        if (auto* label = dynamic_cast<juce::Label*>(child))
-            if (label->getTitle() == "Playing mode") mode = label;
-        if (auto* control = dynamic_cast<juce::Button*>(child))
-        {
-            require(control->getTooltip().isNotEmpty() && control->getWantsKeyboardFocus(), "every button has tooltip and keyboard focus");
-            auto* accessible = control->getAccessibilityHandler();
-            require(accessible && accessible->getTitle().isNotEmpty() && accessible->getHelp().isNotEmpty(),
-                    "every button exposes accessible name and help");
-        }
-    }
-    require(bassTab && guitarTab && bassPower && guitarPower && mono && mode, "tabs, powers, Mono and derived status exist");
-    require(bassTab->getToggleState() && !guitarTab->getToggleState() && !mono->isVisible(), "Bass page initially selected");
-    int numericKnobs = 0;
-    for (auto* child : editor->getChildren())
+            (tab->getButtonText() == "Foundation" ? foundation : swarm) = tab;
         if (auto* knob = dynamic_cast<NumericKnob*>(child))
         {
-            ++numericKnobs;
-            const auto before = knob->getValue();
-            const juce::MouseEvent doubleClick(juce::Desktop::getInstance().getMainMouseSource(), {}, {},
-                0.0f, 0.0f, 0.0f, 0.0f, 0.0f, knob, knob, {}, {}, {}, 2, false);
-            knob->mouseDoubleClick(doubleClick);
-            juce::Label* box = nullptr;
-            for (auto* candidate : knob->getChildren())
-                if (auto* label = dynamic_cast<juce::Label*>(candidate)) box = label;
-            require(box && box->getCurrentTextEditor(), "double-click opens numerical text editor on every knob");
-            auto* entry = box->getCurrentTextEditor();
-            require(entry->getHighlightedRegion().getLength() == entry->getText().length(), "current value starts selected");
-            entry->setText("garbage", false);
-            knob->hideTextBox(false); // Commit path used by the editable Label.
-            require(knob->getValue() == before && knob->getTooltip().contains("unchanged"), "invalid input keeps value with feedback");
-            require(knob->getValueFromText("99999") == before, "out-of-range numerical input is rejected rather than silently clamped");
-            knob->mouseDoubleClick(doubleClick);
-            entry = box->getCurrentTextEditor();
-            entry->setText(juce::String(knob->getMinimum()), false);
-            knob->hideTextBox(true); // Cancellation path; keyboard dispatch belongs to JUCE.
-            require(knob->getValue() == before, "cancelling preserves the numerical value");
-            knob->mouseDoubleClick(doubleClick);
-            entry = box->getCurrentTextEditor();
-            entry->setText(juce::String(knob->getMinimum()), false);
-            knob->hideTextBox(false); // Commit path used by the editable Label.
-            require(std::abs(knob->getValue() - knob->getMinimum()) < 1.0e-6, "committing applies valid boundary through attachment");
-            knob->mouseDoubleClick(doubleClick);
-            entry = box->getCurrentTextEditor();
-            const auto typed = knob->getTitle() == "Output gain" ? 1.234 : knob->getTitle() == "Bass Split" ? 123.456 : 0.321;
-            entry->setText(juce::String(typed, 3) + knob->getTextValueSuffix(), false);
-            knob->hideTextBox(false);
-            require(std::abs(knob->getValue() - typed) < 1.0e-4, "decimal entry with displayed units commits through APVTS");
-            knob->setValue(before, juce::sendNotificationSync);
+            if (knob->getTitle() == "Output gain") output = knob;
+            if (knob->getTitle() == "Foundation level") foundationLevel = knob;
+            if (knob->getTitle() == "Swarm level") swarmLevel = knob;
         }
-    require(numericKnobs == 3, "all three functional knobs use numerical-entry policy");
-    require(slider->getMinimum() == -12.0 && slider->getMaximum() == 6.0, "Output slider uses specified dB range");
-    slider->setValue(-9.0, juce::sendNotificationSync);
-    require(outputDb(processor) == -9.0f, "editor knob updates APVTS");
-    setOutput(processor, 3.0f);
-    require(std::abs(slider->getValue() - 3.0) < 1.0e-5, "host automation updates the editor knob");
-    require(slider->getTextFromValue(3.0).contains("3.000"), "gain display preserves numerical entry precision");
-
-    {
-        IronstackProcessor unchangedPage;
-        juce::MemoryBlock settings;
-        processor.getStateInformation(settings);
-        unchangedPage.setStateInformation(settings.getData(), static_cast<int>(settings.getSize()));
-        for (auto* instrument : {&processor, &unchangedPage}) instrument->prepareToPlay(48000.0, 512);
-        juce::AudioBuffer<float> selected(2, 512), unchanged(2, 512);
-        juce::MidiBuffer a, b;
-        a.addEvent(juce::MidiMessage::noteOn(1, 69, static_cast<juce::uint8>(127)), 0);
-        a.addEvent(juce::MidiMessage::noteOn(1, 57, static_cast<juce::uint8>(127)), 17);
-        b = a;
-        processor.processBlock(selected, a);
-        unchangedPage.processBlock(unchanged, b);
-        for (auto* tab : {guitarTab, bassTab, guitarTab, bassTab})
+        if (auto* button = dynamic_cast<juce::TextButton*>(child))
+            if (button->getButtonText() == "Panic") panic = button;
+        if (auto* label = dynamic_cast<juce::Label*>(child))
+            if (label->getTitle() == "Control description") footer = label;
+        require(dynamic_cast<juce::ToggleButton*>(child) == nullptr, "no power checkboxes or Mono control");
+        if (auto* button = dynamic_cast<juce::Button*>(child))
         {
-            tab->onClick();
-            processor.processBlock(selected, a);
-            unchangedPage.processBlock(unchanged, b);
-            for (int channel = 0; channel < 2; ++channel)
-                for (int sample = 0; sample < 512; ++sample)
-                    require(selected.getSample(channel, sample) == unchanged.getSample(channel, sample),
-                            "actual page clicks leave held-note plugin audio byte-exact");
+            auto* handler = button->getAccessibilityHandler();
+            require(button->getTooltip().isNotEmpty() && button->getWantsKeyboardFocus()
+                && handler && handler->getHelp().isNotEmpty(), "all buttons have accessible help and focus");
         }
     }
-
-    const auto outputBounds = slider->getBounds(), panicBounds = button->getBounds();
-    const auto bassBefore = toggle(processor, ironstack::parameters::bassEnabled);
-    guitarTab->onClick();
-    require(processor.isGuitarPageSelected() && mono->isVisible() && mono->isEnabled(), "Guitars selection shows Mono");
-    require(toggle(processor, ironstack::parameters::bassEnabled) == bassBefore
-            && toggle(processor, ironstack::parameters::guitarEnabled), "page selection cannot change layer enables");
-    require(slider->getBounds() == outputBounds && button->getBounds() == panicBounds, "common strip geometry does not move between pages");
-    rightClickIcon(*bassTab, 70);
-    require(toggle(processor, ironstack::parameters::bassEnabled), "right-click outside icon cannot change power");
-    rightClickIcon(*bassTab);
-    require(!toggle(processor, ironstack::parameters::bassEnabled) && processor.isGuitarPageSelected(),
-            "right-click Bass icon changes power without selecting it");
-    refreshUi();
-    require(bassPower->getButtonText() == "Bass off" && mode->getText().contains("Mode: Guitars"), "disabled power and derived mode have readable text");
-    require(!bassPower->getAccessibilityHandler()->getCurrentState().isChecked()
-            && bassTab->getAccessibilityHandler()->getDescription().contains("Layer off"), "accessible power and tab states distinguish disable from selection");
-    bassPower->setToggleState(true, juce::sendNotificationSync);
-    refreshUi();
-    require(toggle(processor, ironstack::parameters::bassEnabled), "visible power equals icon right-click");
-    rightClickIcon(*guitarTab);
-    require(!toggle(processor, ironstack::parameters::guitarEnabled) && processor.isGuitarPageSelected(), "selected disabled page remains selected");
-    mono->setToggleState(true, juce::sendNotificationSync);
-    require(toggle(processor, ironstack::parameters::guitarMono) && mono->isEnabled(), "disabled guitar page still edits saved Mono");
-    setToggle(processor, ironstack::parameters::bassEnabled, false);
-    refreshUi();
-    require(mode->getText().contains("Mode: Off"), "both-off status is derived, not a third saved control");
-    juce::MemoryBlock disabledPage;
-    processor.getStateInformation(disabledPage);
-    bassTab->onClick();
-    processor.setStateInformation(disabledPage.getData(), static_cast<int>(disabledPage.getSize()));
-    refreshUi();
-    require(guitarTab->getToggleState() && mono->isVisible() && mono->getToggleState()
-            && !bassPower->getToggleState() && !guitarPower->getToggleState(), "held editor restores disabled Guitars page, Mono and both-off");
+    require(foundation && swarm && output && foundationLevel && swarmLevel && panic && footer, "named tabs, levels, output, panic and footer exist");
+    require(foundation->getToggleState() && foundationLevel->isVisible() && !swarmLevel->isVisible(), "Foundation page selected initially");
+    const auto outputBounds = output->getBounds();
+    swarm->onClick();
+    require(processor.isGuitarPageSelected() && swarmLevel->isVisible() && !foundationLevel->isVisible(), "Swarm page selects its level");
+    require(output->getBounds() == outputBounds && toggle(processor, ironstack::parameters::bassEnabled), "page selection preserves common controls and power");
+    rightClickIcon(*foundation, 70);
+    require(toggle(processor, ironstack::parameters::bassEnabled), "right-click label does not toggle power");
+    rightClickIcon(*foundation);
+    require(!toggle(processor, ironstack::parameters::bassEnabled) && processor.isGuitarPageSelected(), "right-click icon toggles power without selecting page");
+    require(!foundation->getAccessibilityHandler()->getCurrentState().isChecked(), "accessible power state updates immediately");
+    foundation->onClick();
+    require(foundationLevel->isVisible() && foundationLevel->isEnabled(), "disabled page remains editable");
+    require(foundation->getAccessibilityHandler()->getActions().invoke(juce::AccessibilityActionType::toggle), "accessible power toggle exists");
+    require(toggle(processor, ironstack::parameters::bassEnabled), "accessible toggle changes the same host parameter");
+    for (auto* knob : {foundationLevel, swarmLevel, output})
     {
-        std::unique_ptr<juce::AudioProcessorEditor> reopened(processor.createEditor());
-        require(processor.isGuitarPageSelected(), "closing/reopening editor retains selected page");
-        bool recalledMono = false;
-        for (auto* child : reopened->getChildren())
-            if (auto* control = dynamic_cast<juce::ToggleButton*>(child))
-                if (control->getButtonText() == "Guitar Mono") recalledMono = control->isVisible() && control->getToggleState();
-        require(recalledMono, "new editor recalls disabled-page settings");
+        if (knob == swarmLevel) swarm->onClick(); else foundation->onClick();
+        require(knob->getTextBoxPosition() == juce::Slider::NoTextBox && !knob->valueEditor().isVisible(), "no persistent numeric field");
+        knob->setValue(-6.0, juce::sendNotificationSync);
+        const juce::MouseEvent doubleClick(juce::Desktop::getInstance().getMainMouseSource(), {}, {},
+            0, 0, 0, 0, 0, knob, knob, {}, {}, {}, 2, false);
+        knob->mouseDoubleClick(doubleClick);
+        require(knob->getValue() == 0.0 && !knob->valueEditor().isVisible(), "double-click resets default without opening entry");
+        const juce::MouseEvent rightClick(juce::Desktop::getInstance().getMainMouseSource(), {},
+            juce::ModifierKeys(juce::ModifierKeys::rightButtonModifier), 0, 0, 0, 0, 0, knob, knob, {}, {}, {}, 1, false);
+        knob->mouseDown(rightClick); knob->mouseUp(rightClick);
+        auto& entry = knob->valueEditor();
+        require(entry.isVisible() && entry.hasKeyboardFocus(true), "right-click opens focused entry");
+        require(entry.getHighlightedRegion().getLength() == entry.getText().length(), "entry selects the full current value");
+        entry.setText("-3.125 dB", false); entry.onReturnKey();
+        require(std::abs(knob->getValue() + 3.125) < 1e-5 && !entry.isVisible(), "Enter commits decimal units and hides field");
+        knob->openEntry(); entry.setText("-4.25", false); entry.onFocusLost();
+        require(std::abs(knob->getValue() + 4.25) < 1e-5 && !entry.isVisible(), "focus loss commits and hides field");
+        knob->openEntry(); entry.setText("-5.5", false); knob->commitIfOutside(panic);
+        require(std::abs(knob->getValue() + 5.5) < 1e-5 && !entry.isVisible(), "click-away commits even on a non-focus-taking control");
+        knob->openEntry(); entry.setText("-10", false); entry.onEscapeKey();
+        require(std::abs(knob->getValue() + 5.5) < 1e-5, "Escape cancels");
+        for (const auto* invalid : {"garbage", "99999", "nan", "2.2.2"})
+        {
+            knob->openEntry(); entry.setText(invalid, false); entry.onReturnKey();
+            require(std::abs(knob->getValue() + 5.5) < 1e-5 && !entry.isVisible(), "invalid values preserve setting and close field");
+        }
+        knob->setValue(0.0, juce::sendNotificationSync);
     }
-    // The accessible action uses the same attachment/gesture as a mouse click.
-    require(guitarPower->getAccessibilityHandler()->getActions().invoke(juce::AccessibilityActionType::toggle), "power exposes accessible toggle");
-    refreshUi();
-    require(toggle(processor, ironstack::parameters::guitarEnabled), "accessible power action reaches host parameter");
-    for (const auto size : {juce::Point<int>{560, 460}, juce::Point<int>{1000, 700}, juce::Point<int>{680, 480}})
+    output->setValue(-9.0, juce::sendNotificationSync);
+    require(outputDb(processor) == -9.0f, "output writes through APVTS");
+    setOutput(processor, 3.0f);
+    require(std::abs(output->getValue() - 3.0) < 1e-5, "host updates output knob");
+    foundationLevel->setValue(-4.0, juce::sendNotificationSync);
+    swarmLevel->setValue(-7.0, juce::sendNotificationSync);
+    rightClickIcon(*swarm);
+    swarm->onClick();
+    juce::MemoryBlock settings;
+    processor.getStateInformation(settings);
+    IronstackProcessor recalled;
+    recalled.setStateInformation(settings.getData(), static_cast<int>(settings.getSize()));
+    require(recalled.isGuitarPageSelected() && !toggle(recalled, ironstack::parameters::guitarEnabled)
+        && recalled.parameterState().getRawParameterValue(ironstack::parameters::bassVolume)->load() == -4.0f
+        && recalled.parameterState().getRawParameterValue(ironstack::parameters::guitarVolume)->load() == -7.0f,
+        "disabled-page power, levels and selected page restore");
+    for (const auto size : {juce::Point<int>{560, 360}, juce::Point<int>{1000, 600}, juce::Point<int>{680, 400}})
     {
         editor->setSize(size.x, size.y);
-        for (auto* child : editor->getChildren())
-            require(editor->getLocalBounds().contains(child->getBounds()), "resized controls fit bounds on both pages");
-        const auto common = slider->getBounds();
-        bassTab->onClick();
-        require(slider->getBounds() == common, "resizing retains shared geometry on Bass page");
-        guitarTab->onClick();
-        require(slider->getBounds() == common, "resizing retains shared geometry on Guitars page");
+        for (auto* child : editor->getChildren()) require(editor->getLocalBounds().contains(child->getBounds()), "all resized controls fit");
+        const auto common = output->getBounds();
+        foundation->onClick(); swarm->onClick();
+        require(output->getBounds() == common && footer->getHeight() == 26, "stable output and one-line footer geometry");
     }
+    // Keyboard focus gives the same footer text without requiring synthetic mouse movement.
+    output->grabKeyboardFocus(); refreshUi();
+    require(footer->getText().isNotEmpty() && !footer->getText().containsChar('\n'), "footer gives one-line contextual help");
     setToggle(processor, ironstack::parameters::bassEnabled, true);
     setToggle(processor, ironstack::parameters::guitarEnabled, true);
-    setToggle(processor, ironstack::parameters::guitarMono, false);
-    bassTab->onClick();
-    refreshUi();
-
-    processor.prepareToPlay(48000.0, 512);
-    juce::AudioBuffer<float> audio(2, 512);
-    juce::MidiBuffer midi;
+    processor.prepareToPlay(48000, 512);
+    juce::AudioBuffer<float> audio(2, 512); juce::MidiBuffer midi;
     midi.addEvent(juce::MidiMessage::noteOn(1, 69, static_cast<juce::uint8>(127)), 0);
-    processor.processBlock(audio, midi);
-    button->onClick();
-    processor.processBlock(audio, midi);
-    require(audio.getMagnitude(0, 340, 172) == 0.0f, "editor Panic action reaches audio without touching voice state on UI thread");
-
+    processor.processBlock(audio, midi); panic->onClick(); processor.processBlock(audio, midi);
+    require(audio.getMagnitude(0, 340, 172) == 0.0f, "Panic clears audio through realtime request");
     if (snapshot.isNotEmpty())
     {
-        setOutput(processor, 0.0f);
-        editor->setVisible(true);
-        const auto capture = [&](const juce::File& file, int scale)
-        {
-            // Use CPU images for repeatable offscreen QA: repeated 2x native
-            // GPU captures were incomplete on the development machine.
-            juce::Image image(juce::Image::ARGB, editor->getWidth() * scale, editor->getHeight() * scale, true,
-                              juce::SoftwareImageType{});
-            {
-                juce::Graphics graphics(image);
-                graphics.addTransform(juce::AffineTransform::scale(static_cast<float>(scale)));
-                editor->paintEntireComponent(graphics, false);
-            }
-            require(image.getPixelAt(0, 0) == juce::Colour(0xff17191d), "preview includes the painted editor");
-            int paintedOutputPixels = 0;
-            const auto bounds = slider->getBounds() * scale;
-            for (int y = bounds.getY(); y < bounds.getBottom(); ++y)
-                for (int x = bounds.getX(); x < bounds.getRight(); ++x)
-                    if (image.getPixelAt(x, y) != juce::Colour(0xff22252a)) ++paintedOutputPixels;
-            require(paintedOutputPixels > 100 * scale * scale, "every page/scale preview includes the shared Output control");
-            juce::MemoryOutputStream stream;
-            require(juce::PNGImageFormat{}.writeImageToStream(image, stream)
-                    && file.replaceWithData(stream.getData(), stream.getDataSize()), "editor preview renders");
-        };
+        setOutput(processor, 0);
         const juce::File base(snapshot);
-        capture(base, 1);
-        capture(base.getSiblingFile("m4.3u2-bass-2x.png"), 2);
-        guitarTab->onClick();
-        capture(base.getSiblingFile("m4.3u2-guitars.png"), 1);
-        capture(base.getSiblingFile("m4.3u2-guitars-2x.png"), 2);
-        editor->setSize(560, 460);
-        capture(base.getSiblingFile("m4.3u2-guitars-min.png"), 1);
-        bassTab->onClick();
-        capture(base.getSiblingFile("m4.3u2-bass-min.png"), 1);
+        for (const bool selected : {false, true}) for (int scale : {1, 2})
+        {
+            (selected ? swarm : foundation)->onClick();
+            juce::Image image(juce::Image::ARGB, editor->getWidth()*scale, editor->getHeight()*scale, true, juce::SoftwareImageType{});
+            { juce::Graphics g(image); g.addTransform(juce::AffineTransform::scale(static_cast<float>(scale))); editor->paintEntireComponent(g, false); }
+            juce::MemoryOutputStream stream;
+            const auto file = base.getSiblingFile(juce::String("ui1-") + (selected ? "swarm" : "foundation") + "-" + juce::String(scale) + "x.png");
+            require(juce::PNGImageFormat{}.writeImageToStream(image, stream) && file.replaceWithData(stream.getData(), stream.getDataSize()), "UI snapshot saved");
+        }
     }
-    std::cout << "editor_controls/attachments/panic/layout passed\n";
+    std::cout << "tab power, value entry, defaults, recall, footer and layout passed\n";
 }
 
 void keyboardTests()
@@ -624,45 +543,27 @@ void keyboardTests()
     IronstackProcessor processor;
     std::unique_ptr<juce::AudioProcessorEditor> editor(processor.createEditor());
     editor->addToDesktop(0);
-    juce::Component* guitars = nullptr;
-    juce::Button* power = nullptr;
-    for (auto* child : editor->getChildren())
-    {
-        if (auto* tab = dynamic_cast<LayerTab*>(child))
-            if (tab->getButtonText() == "Guitars") guitars = tab;
-        if (auto* control = dynamic_cast<juce::ToggleButton*>(child))
-            if (control->getButtonText() == "Bass on") power = control;
-    }
-    require(guitars && power, "keyboard controls found");
+    LayerTab* swarm = nullptr;
+    for (auto* child : editor->getChildren()) if (auto* tab = dynamic_cast<LayerTab*>(child))
+        if (tab->getButtonText() == "Swarm") swarm = tab;
+    require(swarm != nullptr, "Swarm keyboard tab exists");
     bool completed = false;
-    // Exercise JUCE's real queued button actions with its normal event loop;
-    // production code does not need nested/modal message loops for these tests.
     juce::MessageManager::callAsync([&]
     {
-        require(guitars->keyPressed(juce::KeyPress(juce::KeyPress::returnKey)), "tab handles keyboard Enter");
+        require(swarm->keyPressed(juce::KeyPress(juce::KeyPress::returnKey)), "Enter selects tab");
         juce::Timer::callAfterDelay(100, [&]
         {
-            require(processor.isGuitarPageSelected() && toggle(processor, ironstack::parameters::bassEnabled),
-                    "keyboard selects page without changing sound state");
-            require(static_cast<juce::Component&>(*power).keyPressed(juce::KeyPress(juce::KeyPress::returnKey)), "power handles keyboard Enter");
-            juce::Timer::callAfterDelay(100, [&]
-            {
-                require(!toggle(processor, ironstack::parameters::bassEnabled) && processor.isGuitarPageSelected(),
-                        "keyboard power toggles layer without changing page");
-                require(power->getAccessibilityHandler()->getActions().invoke(juce::AccessibilityActionType::press), "accessible press is available");
-                juce::Timer::callAfterDelay(100, [&]
-                {
-                    require(toggle(processor, ironstack::parameters::bassEnabled), "queued accessible press toggles same host parameter");
-                    completed = true;
-                    juce::MessageManager::getInstance()->stopDispatchLoop();
-                });
-            });
+            require(processor.isGuitarPageSelected() && toggle(processor, ironstack::parameters::guitarEnabled), "keyboard tab selection is audio neutral");
+            require(swarm->keyPressed(juce::KeyPress(juce::KeyPress::returnKey, juce::ModifierKeys::altModifier, 0)), "Alt+Enter toggles power");
+            require(!toggle(processor, ironstack::parameters::guitarEnabled) && processor.isGuitarPageSelected(), "keyboard power leaves page selected");
+            completed = true;
+            juce::MessageManager::getInstance()->stopDispatchLoop();
         });
     });
     juce::MessageManager::getInstance()->runDispatchLoop();
-    require(completed, "keyboard event-loop checks completed");
-    std::cout << "editor_keyboard/accessibility_actions passed\n";
+    require(completed, "keyboard checks completed");
 }
+
 }
 
 int main(int argc, char** argv)

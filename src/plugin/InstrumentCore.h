@@ -29,6 +29,7 @@ public:
         output.reset(outputDb);
     }
     void setOutputDb(float db) noexcept { output.setTarget(db); }
+    void setLayerLevels(float bassDb, float guitarDb) noexcept { engine.setLayerLevels(bassDb, guitarDb); }
     void setGuitarMono(bool mono) noexcept { engine.setGuitarMono(mono); }
     // Enables choose playing policy; output masks below only isolate that policy.
     void setLayersEnabled(bool bass, bool guitar) noexcept { engine.setLayersEnabled(bass, guitar); }

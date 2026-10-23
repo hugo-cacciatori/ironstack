@@ -3,177 +3,177 @@
 
 IronstackEditor::IronstackEditor(IronstackProcessor& processor)
     : AudioProcessorEditor(processor), owner(processor),
-      outputAttachment(processor.parameterState(), ironstack::parameters::output, output),
-      splitAttachment(processor.parameterState(), ironstack::parameters::crossover, split),
-      destructionAttachment(processor.parameterState(), ironstack::parameters::destruction, destruction),
-      bassAttachment(processor.parameterState(), ironstack::parameters::bassEnabled, bassPower),
-      guitarAttachment(processor.parameterState(), ironstack::parameters::guitarEnabled, guitarPower),
-      monoAttachment(processor.parameterState(), ironstack::parameters::guitarMono, mono)
+      foundationAttachment(processor.parameterState(), ironstack::parameters::bassVolume, foundationLevel),
+      swarmAttachment(processor.parameterState(), ironstack::parameters::guitarVolume, swarmLevel),
+      outputAttachment(processor.parameterState(), ironstack::parameters::output, output)
 {
     title.setText(JucePlugin_Name, juce::dontSendNotification);
     title.setFont(juce::FontOptions(28.0f));
-    bassTab.onClick = [this] { selectPage(false); };
-    guitarTab.onClick = [this] { selectPage(true); };
-    bassTab.setRadioGroupId(1);
-    guitarTab.setRadioGroupId(1);
-    bassTab.setClickingTogglesState(true);
-    guitarTab.setClickingTogglesState(true);
-    bassTab.onPowerToggle = [this] { bassPower.setToggleState(!bassPower.getToggleState(), juce::sendNotificationSync); timerCallback(); };
-    guitarTab.onPowerToggle = [this] { guitarPower.setToggleState(!guitarPower.getToggleState(), juce::sendNotificationSync); timerCallback(); };
-    bassTab.setTooltip("Select the Bass page. Right-click the instrument icon to turn bass on or off.");
-    guitarTab.setTooltip("Select the Guitars page. Right-click the instrument icon to turn guitars on or off.");
-    bassPower.setTooltip("Turn bass on or off. Bass alone holds its first note; with guitars on it follows the lowest held note.");
-    guitarPower.setTooltip("Turn guitars on or off. Guitars play your exact notes; bass follows the lowest held note when both are on.");
-    mono.setTooltip("Keep the left guitar sound, center it, and match its level. Bass is unchanged.");
-    mode.setTitle("Playing mode");
-    mode.setFont(juce::FontOptions(14.0f));
-    pageHelp.setFont(juce::FontOptions(14.0f));
-    pageHelp.setJustificationType(juce::Justification::topLeft);
-    outputLabel.setText("Output", juce::dontSendNotification);
-    splitLabel.setText("Bass Split", juce::dontSendNotification);
-    destructionLabel.setText("Destruction", juce::dontSendNotification);
-    for (auto* label : {&outputLabel, &splitLabel, &destructionLabel})
-        label->setJustificationType(juce::Justification::centred);
-    for (auto* knob : {&output, &split, &destruction})
+    foundationTab.onClick = [this] { selectPage(false); };
+    swarmTab.onClick = [this] { selectPage(true); };
+    foundationTab.onPowerToggle = [this] { toggleLayer(ironstack::parameters::bassEnabled); };
+    swarmTab.onPowerToggle = [this] { toggleLayer(ironstack::parameters::guitarEnabled); };
+    foundationTab.setTooltip("Foundation: select tab; right-click icon to enable or disable. Alt+Enter also toggles power.");
+    swarmTab.setTooltip("Swarm: select tab; right-click icon to enable or disable. Alt+Enter also toggles power.");
+    for (auto* tab : {&foundationTab, &swarmTab})
     {
-        knob->setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
-        knob->setTextBoxStyle(juce::Slider::TextBoxBelow, false, 130, 28);
-        knob->setNumDecimalPlacesToDisplay(3);
-        knob->setColour(juce::Slider::rotarySliderFillColourId, juce::Colour(0xffe9a153));
+        tab->setRadioGroupId(1);
+        tab->setClickingTogglesState(true);
     }
-    output.setTextValueSuffix(" dB");
-    output.setTitle("Output gain");
-    output.setTooltip("Master output gain. Double-click to type an exact dB value.");
-    split.setTextValueSuffix(" Hz");
-    split.setTitle("Bass Split");
-    split.setTooltip("High-pass cutoff around the bass upper drive. The clean sine stays intact. Double-click to type Hz.");
-    destruction.setTitle("Destruction");
-    destruction.setTooltip("Adds drive to both layers while keeping the clean bass foundation intact, from 0 to 1. Double-click to type a value.");
-    instructions.setText("Fixed attack/release\nBend: +/-2 semitones\nLatency: 32 samples",
-                         juce::dontSendNotification);
-    instructions.setFont(juce::FontOptions(13.0f));
-    instructions.setJustificationType(juce::Justification::topLeft);
-    panic.setTooltip("Release all sounding notes.");
-    panic.onClick = [&processor] { processor.requestPanic(); };
-    help.setTooltip("Help and information about Ironstack.");
-    const auto safeEditor = juce::Component::SafePointer<IronstackEditor>(this);
-    help.onClick = [safeEditor]
+    levelLabel.setText("Level", juce::dontSendNotification);
+    outputLabel.setText("Output", juce::dontSendNotification);
+    for (auto* label : {&levelLabel, &outputLabel})
     {
-        if (safeEditor == nullptr)
-            return;
-        juce::PopupMenu menu;
-        menu.addItem(1, "About Ironstack...");
-        menu.showMenuAsync(juce::PopupMenu::Options{}.withTargetComponent(&safeEditor->help),
-            [safeEditor](int result)
-            {
-                if (result == 1 && safeEditor != nullptr)
-                    safeEditor->showAbout();
-            });
-    };
-    for (auto* child : std::array<juce::Component*, 17>{&title, &mode, &outputLabel, &splitLabel, &destructionLabel,
-            &instructions, &pageHelp, &output, &split, &destruction, &panic, &help,
-            &bassTab, &guitarTab, &bassPower, &guitarPower, &mono})
+        label->setJustificationType(juce::Justification::centred);
+        label->setFont(juce::FontOptions(15.0f));
+    }
+    hoverHelp.setTitle("Control description");
+    hoverHelp.setFont(juce::FontOptions(12.0f));
+    hoverHelp.setJustificationType(juce::Justification::centredLeft);
+    hoverHelp.setMinimumHorizontalScale(1.0f);
+    foundationLevel.setTitle("Foundation level");
+    swarmLevel.setTitle("Swarm level");
+    output.setTitle("Output gain");
+    foundationLevel.setTooltip("Foundation level. Double-click resets; right-click types dB. -60 dB silences this layer.");
+    swarmLevel.setTooltip("Swarm level. Double-click resets; right-click types dB. -60 dB silences this layer.");
+    output.setTooltip("Master output level. Double-click resets to 0 dB; right-click types an exact value.");
+    outputLabel.setTooltip(output.getTooltip());
+    const std::array<const char*, 3> ids{ironstack::parameters::bassVolume, ironstack::parameters::guitarVolume,
+                                      ironstack::parameters::output};
+    const std::array<NumericKnob*, 3> knobs{&foundationLevel, &swarmLevel, &output};
+    for (std::size_t i = 0; i < knobs.size(); ++i)
+    {
+        auto& knob = *knobs[i];
+        knob.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
+        knob.setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
+        knob.setNumDecimalPlacesToDisplay(3);
+        knob.setTextValueSuffix(" dB");
+        knob.setDoubleClickReturnValue(true, 0.0);
+        knob.setPopupDisplayEnabled(false, false, nullptr);
+        knob.setColour(juce::Slider::rotarySliderFillColourId, juce::Colour(0xffe9a153));
+        knob.setHelpText(knob.getTooltip());
+        knob.setWantsKeyboardFocus(true);
+        auto* parameter = processor.parameterState().getParameter(ids[i]);
+        knob.onEntryGesture = [parameter](bool begin)
+        {
+            if (begin) parameter->beginChangeGesture(); else parameter->endChangeGesture();
+        };
+    }
+    panic.setTooltip("Stop all sounding notes.");
+    panic.onClick = [&processor] { processor.requestPanic(); };
+    help.setTooltip("About Ironstack.");
+    help.onClick = [this] { showAbout(); };
+    for (auto* child : std::array<juce::Component*, 11>{&title, &levelLabel, &outputLabel, &hoverHelp,
+            &foundationLevel, &swarmLevel, &output, &foundationTab, &swarmTab, &panic, &help})
         addAndMakeVisible(child);
-    for (auto* button : std::array<juce::Button*, 7>{&bassTab, &guitarTab, &bassPower, &guitarPower, &mono, &panic, &help})
+    for (auto* button : std::array<juce::Button*, 4>{&foundationTab, &swarmTab, &panic, &help})
     {
         button->setWantsKeyboardFocus(true);
         button->setTitle(button->getButtonText());
         button->setHelpText(button->getTooltip());
     }
-    for (auto* knob : {&output, &split, &destruction})
-    {
-        knob->setHelpText(knob->getTooltip());
-        knob->setWantsKeyboardFocus(true);
-    }
-    // Follow the visible instrument/power pairs, then the current page and
-    // common strip, rather than the order the components were constructed.
-    bassTab.setExplicitFocusOrder(1);
-    bassPower.setExplicitFocusOrder(2);
-    guitarTab.setExplicitFocusOrder(3);
-    guitarPower.setExplicitFocusOrder(4);
-    split.setExplicitFocusOrder(5);
-    mono.setExplicitFocusOrder(5);
-    destruction.setExplicitFocusOrder(6);
-    output.setExplicitFocusOrder(7);
-    panic.setExplicitFocusOrder(8);
-    help.setExplicitFocusOrder(9);
+    foundationTab.setExplicitFocusOrder(1); swarmTab.setExplicitFocusOrder(2);
+    foundationLevel.setExplicitFocusOrder(3); swarmLevel.setExplicitFocusOrder(3);
+    output.setExplicitFocusOrder(4); panic.setExplicitFocusOrder(5); help.setExplicitFocusOrder(6);
+    addMouseListener(this, true);
+    setWantsKeyboardFocus(true);
     setResizable(true, true);
-    setResizeLimits(560, 460, 1000, 700);
-    setSize(680, 480);
+    setResizeLimits(560, 360, 1000, 600);
+    setSize(680, 400);
     timerCallback();
-    startTimerHz(20);
+    startTimerHz(30);
 }
 
-void IronstackEditor::paint(juce::Graphics& graphics)
+IronstackEditor::~IronstackEditor() { removeMouseListener(this); }
+
+void IronstackEditor::mouseDown(const juce::MouseEvent& event)
 {
-    graphics.fillAll(juce::Colour(0xff17191d));
-    graphics.setColour(juce::Colour(0xff22252a));
-    graphics.fillRect(0, getHeight() - 160, getWidth(), 160);
+    for (auto* knob : {&foundationLevel, &swarmLevel, &output}) knob->commitIfOutside(event.eventComponent);
+}
+
+void IronstackEditor::paint(juce::Graphics& g)
+{
+    g.fillAll(juce::Colour(0xff17191d));
+    g.setColour(juce::Colour(0xff292d33));
+    g.fillRoundedRectangle(24.0f, 132.0f, getWidth() - 48.0f, getHeight() - 174.0f, 8.0f);
+    // Connect the selected tab to the page rather than drawing separate buttons.
+    g.fillRect(24, 132, getWidth() - 48, 12);
+    g.setColour(juce::Colour(0xff101216));
+    g.fillRect(0, getHeight() - 30, getWidth(), 30);
+    g.setColour(juce::Colour(0xff353a42));
+    g.drawHorizontalLine(getHeight() - 30, 0.0f, static_cast<float>(getWidth()));
 }
 
 void IronstackEditor::resized()
 {
-    const auto width = getWidth(), commonTop = getHeight() - 160;
-    const auto groupWidth = (width - 64) / 2;
-    title.setBounds(24, 18, width - 144, 40);
-    help.setBounds(width - 80, 26, 56, 28);
-    bassTab.setBounds(24, 76, groupWidth - 96, 44);
-    bassPower.setBounds(24 + groupWidth - 92, 82, 92, 32);
-    guitarTab.setBounds(40 + groupWidth, 76, groupWidth - 96, 44);
-    guitarPower.setBounds(40 + groupWidth * 2 - 92, 82, 92, 32);
-    mode.setBounds(24, 132, width - 48, 24);
-    splitLabel.setBounds(24, 168, 152, 24);
-    split.setBounds(24, 192, 152, commonTop - 200);
-    mono.setBounds(24, 192, 200, 32);
-    pageHelp.setBounds(216, 174, width - 240, commonTop - 182);
-    destructionLabel.setBounds(24, commonTop + 8, 152, 24);
-    outputLabel.setBounds(204, commonTop + 8, 152, 24);
-    destruction.setBounds(24, commonTop + 32, 152, 116);
-    output.setBounds(204, commonTop + 32, 152, 116);
-    instructions.setBounds(380, commonTop + 16, width - 404, 72);
-    panic.setBounds(width - 152, getHeight() - 56, 128, 36);
+    const auto width = getWidth();
+    title.setBounds(24, 20, width - 140, 40);
+    help.setBounds(width - 84, 25, 60, 30);
+    const auto tabWidth = (width - 48) / 2;
+    foundationTab.setBounds(24, 88, tabWidth, 46);
+    swarmTab.setBounds(24 + tabWidth, 88, width - 48 - tabWidth, 46);
+    const auto leftCentre = width / 4 + 12, rightCentre = width * 3 / 4 - 12;
+    levelLabel.setBounds(leftCentre - 90, 153, 180, 26);
+    outputLabel.setBounds(rightCentre - 90, 153, 180, 26);
+    const auto knobHeight = getHeight() - 266;
+    foundationLevel.setBounds(leftCentre - 84, 180, 168, knobHeight);
+    swarmLevel.setBounds(foundationLevel.getBounds());
+    output.setBounds(rightCentre - 84, 180, 168, knobHeight);
+    panic.setBounds(width - 128, getHeight() - 78, 88, 28);
+    hoverHelp.setBounds(16, getHeight() - 28, width - 32, 26);
 }
 
-void IronstackEditor::selectPage(bool guitars)
+void IronstackEditor::toggleLayer(const char* id)
 {
-    owner.selectGuitarPage(guitars);
+    auto* parameter = owner.parameterState().getParameter(id);
+    parameter->beginChangeGesture();
+    parameter->setValueNotifyingHost(parameter->getValue() >= 0.5f ? 0.0f : 1.0f);
+    parameter->endChangeGesture();
+    timerCallback();
+}
+
+void IronstackEditor::selectPage(bool swarm)
+{
+    if (swarm != owner.isGuitarPageSelected())
+    {
+        foundationLevel.finishEntry(true);
+        swarmLevel.finishEntry(true);
+    }
+    owner.selectGuitarPage(swarm);
     timerCallback();
 }
 
 void IronstackEditor::timerCallback()
 {
-    const bool guitars = owner.isGuitarPageSelected();
-    const bool bassOn = owner.parameterState().getRawParameterValue(ironstack::parameters::bassEnabled)->load() >= 0.5f;
-    const bool guitarOn = owner.parameterState().getRawParameterValue(ironstack::parameters::guitarEnabled)->load() >= 0.5f;
-    bassTab.setToggleState(!guitars, juce::dontSendNotification);
-    guitarTab.setToggleState(guitars, juce::dontSendNotification);
-    bassTab.setLayerEnabled(bassOn);
-    guitarTab.setLayerEnabled(guitarOn);
-    bassPower.setButtonText(bassOn ? "Bass on" : "Bass off");
-    guitarPower.setButtonText(guitarOn ? "Guitars on" : "Guitars off");
-    bassPower.setTitle(bassPower.getButtonText());
-    guitarPower.setTitle(guitarPower.getButtonText());
-    bassTab.setDescription(juce::String(guitars ? "Bass page. " : "Bass page selected. ") + (bassOn ? "Layer on." : "Layer off; still editable."));
-    guitarTab.setDescription(juce::String(guitars ? "Guitars page selected. " : "Guitars page. ") + (guitarOn ? "Layer on." : "Layer off; still editable."));
-    const juce::String routing = bassOn ? (guitarOn ? "Both" : "Bass") : (guitarOn ? "Guitars" : "Off");
-    mode.setText("Mode: " + routing + "  |  " + bassPower.getButtonText() + "  |  " + guitarPower.getButtonText(), juce::dontSendNotification);
-    mode.setDescription("Playing mode is derived from the two layer power controls.");
-    split.setVisible(!guitars);
-    splitLabel.setVisible(!guitars);
-    mono.setVisible(guitars);
-    pageHelp.setText(guitars ? "Eight notes at the pitches you play.\nMono centers the left guitar sound."
-                             : "One octave below your input.\nBass alone holds its first note; Both follows the lowest held note.",
-                     juce::dontSendNotification);
+    const auto swarm = owner.isGuitarPageSelected();
+    foundationTab.setToggleState(!swarm, juce::dontSendNotification);
+    swarmTab.setToggleState(swarm, juce::dontSendNotification);
+    foundationTab.setLayerEnabled(owner.parameterState().getRawParameterValue(ironstack::parameters::bassEnabled)->load() >= 0.5f);
+    swarmTab.setLayerEnabled(owner.parameterState().getRawParameterValue(ironstack::parameters::guitarEnabled)->load() >= 0.5f);
+    for (auto* tab : {&foundationTab, &swarmTab})
+        tab->setDescription(tab->getButtonText() + (tab->getToggleState() ? " page selected. " : " page. ")
+                            + (tab->isLayerEnabled() ? "Layer on." : "Layer off; still editable."));
+    if (foundationLevel.isVisible() == swarm) foundationLevel.finishEntry(true);
+    if (swarmLevel.isVisible() != swarm) swarmLevel.finishEntry(true);
+    foundationLevel.setVisible(!swarm); swarmLevel.setVisible(swarm);
+    levelLabel.setTooltip(swarm ? swarmLevel.getTooltip() : foundationLevel.getTooltip());
+    const auto describe = [this](juce::Component* target) -> juce::String
+    {
+        if (target == nullptr || (target != this && !isParentOf(target))) return {};
+        for (auto* component = target; component != nullptr && component != this; component = component->getParentComponent())
+            if (auto* tooltip = dynamic_cast<juce::TooltipClient*>(component))
+                if (const auto text = tooltip->getTooltip(); text.isNotEmpty()) return text;
+        return {};
+    };
+    auto description = describe(juce::Desktop::getInstance().getMainMouseSource().getComponentUnderMouse());
+    if (description.isEmpty()) description = describe(juce::Component::getCurrentlyFocusedComponent());
+    hoverHelp.setText(description.replaceCharacter('\n', ' '), juce::dontSendNotification);
 }
 
 void IronstackEditor::showAbout()
 {
-    // Tie the asynchronous dialog to the editor so unloading the plugin closes it.
     aboutBox = juce::NativeMessageBox::showScopedAsync(
-        juce::MessageBoxOptions{}
-            .withTitle("About Ironstack")
-            .withMessage(juce::String(JucePlugin_Name) + " " + JucePlugin_VersionString
-                         + "\n\nInstrument prototype\nHugo Cacciatori")
-            .withButton("Close")
-            .withAssociatedComponent(this), {});
+        juce::MessageBoxOptions{}.withTitle("About Ironstack")
+            .withMessage(juce::String(JucePlugin_Name) + " " + JucePlugin_VersionString + "\n\nHugo Cacciatori")
+            .withButton("Close").withAssociatedComponent(this), {});
 }

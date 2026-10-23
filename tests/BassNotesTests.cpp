@@ -15,6 +15,33 @@ using Change = ironstack::BassNotes::Change;
 
 int main()
 {
+    {
+        ironstack::BassNotes newest;
+        newest.setPolicy(ironstack::BassNotes::Policy::newest);
+        newest.noteOn(1, 60, 70); newest.noteOn(2, 48, 110); newest.noteOn(1, 72, 90);
+        require(newest.target().note == 72, "newest key wins in either pitch direction");
+        newest.noteOff(2, 48);
+        require(newest.target().note == 72, "non-selected release leaves newest note unchanged");
+        newest.noteOff(1, 72);
+        require(newest.target().note == 60, "release falls back to newest remaining held key");
+        newest.noteOn(2, 60, 110);
+        require(newest.target().channel == 2, "newest same-pitch channel owns velocity and bend");
+        newest.noteOn(1, 72, 90); newest.noteOn(1, 60, 127);
+        require(newest.target().note == 60 && newest.target().channel == 1, "repeat press moves existing key to newest without stacking");
+        newest.noteOff(1, 60);
+        require(newest.target().note == 72, "one note-off clears repeated key");
+        newest.allNotesOff(1);
+        require(newest.target().note == 60 && newest.target().channel == 2, "panic removes only its channel before fallback");
+        newest.noteOn(2, 60, 0);
+        require(newest.target().note == -1, "velocity-zero newest note releases");
+        for (int channel = 1; channel <= 16; ++channel) for (int note = 0; note < 128; ++note)
+            newest.noteOn(channel, note, 100);
+        require(newest.target().channel == 16 && newest.target().note == 127, "newest full ledger stays bounded");
+        newest.noteOn(1, 0, 127);
+        require(newest.target().channel == 1 && newest.target().note == 0, "full-ledger repeated oldest becomes newest");
+        newest.noteOff(1, 0);
+        require(newest.target().channel == 16 && newest.target().note == 127, "full-ledger repeat retains deterministic fallback");
+    }
     ironstack::BassNotes notes;
     require(notes.target().note == -1, "empty selection");
     require(notes.noteOn(1, 52, 100) == Change::attack, "first key attacks");

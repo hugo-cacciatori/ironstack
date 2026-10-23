@@ -184,8 +184,8 @@ int main(int argc, char** argv)
     add(notes, juce::MidiMessage::controllerEvent(1, 64, 127), 480);
     add(notes, juce::MidiMessage::noteOff(1, 69), 720);
     add(notes, juce::MidiMessage::noteOn(2, 45, static_cast<juce::uint8>(96)), 900);
-    add(chord, juce::MidiMessage::noteOn(1, 57, static_cast<juce::uint8>(127)), 240);
-    add(chord, juce::MidiMessage::noteOn(1, 57, static_cast<juce::uint8>(0)), 720);
+    add(chord, juce::MidiMessage::noteOn(1, 81, static_cast<juce::uint8>(127)), 240);
+    add(chord, juce::MidiMessage::noteOn(1, 81, static_cast<juce::uint8>(0)), 720);
     midi.addTrack(tempo); midi.addTrack(notes); midi.addTrack(chord);
     {
         auto stream = input.createOutputStream();
@@ -227,11 +227,11 @@ int main(int argc, char** argv)
     // Independent expected times in samples: 500 ms/quarter then 250 ms/quarter.
     const std::vector<Event> events{
         {12000, juce::MidiMessage::noteOn(1, 69, static_cast<juce::uint8>(127))},
-        {12000, juce::MidiMessage::noteOn(1, 57, static_cast<juce::uint8>(127))},
+        {12000, juce::MidiMessage::noteOn(1, 81, static_cast<juce::uint8>(127))},
         {24000, juce::MidiMessage::pitchWheel(1, 16383)},
         {24000, juce::MidiMessage::controllerEvent(1, 64, 127)},
         {30000, juce::MidiMessage::noteOff(1, 69)},
-        {30000, juce::MidiMessage::noteOff(1, 57)},
+        {30000, juce::MidiMessage::noteOff(1, 81)},
         {34500, juce::MidiMessage::noteOn(2, 45, static_cast<juce::uint8>(96))}};
     int cursor = 0;
     for (const auto& event : events)
@@ -324,7 +324,7 @@ int main(int argc, char** argv)
                 "CLI non-default controls and diagnostic mask are recorded accurately");
     }
     require(!identical(root.getChildFile("bass-b1-g0.wav"), root.getChildFile("bass-b1-g1.wav")),
-            "overlapping lower key distinguishes Bass lock from lowest-root Both isolation");
+            "higher newest key distinguishes solo last-note priority from combined lowest-root isolation");
     require(identical(root.getChildFile("bass-b1-g0.wav"), root.getChildFile("bass-mono-b1-g0.wav"))
             && identical(root.getChildFile("bass-b1-g1.wav"), root.getChildFile("bass-mono-b1-g1.wav")),
             "Guitar Mono cannot affect Bass-only or isolated Both bass");

@@ -39,17 +39,14 @@ public:
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameters();
     float readOutputDb() const noexcept;
-    float readSplit() const noexcept;
-    float readDestruction() const noexcept;
     static bool readToggle(const std::atomic<float>* parameter, bool fallback) noexcept;
     ironstack::InstrumentCore core;
     juce::AudioProcessorValueTreeState state;
     std::atomic<float>* outputDb = nullptr;
-    std::atomic<float>* splitHz = nullptr;
-    std::atomic<float>* destruction = nullptr;
+    std::atomic<float>* bassVolume = nullptr;
+    std::atomic<float>* guitarVolume = nullptr;
     std::atomic<float>* bassEnabled = nullptr;
     std::atomic<float>* guitarEnabled = nullptr;
-    std::atomic<float>* guitarMono = nullptr;
     double preparedRate = 44100.0;
     std::atomic<bool> panicRequested{false};
     // UI preference is independent of automatable sound state; no ValueTree

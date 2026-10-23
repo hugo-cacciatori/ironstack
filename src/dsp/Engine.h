@@ -38,6 +38,7 @@ public:
     void prepare(double sampleRate) noexcept;
     void reset() noexcept;
     void setLayersEnabled(bool bass, bool guitar) noexcept;
+    void setLayerLevels(float bassDb, float guitarDb) noexcept;
     void setGuitarMono(bool mono) noexcept { guitarMono.setEnabled(mono); }
     double guitarMonoGain() const noexcept { return guitarMono.gain(); }
     void setBassParameters(float splitHz, float destruction) noexcept { bassVoice.setParameters(splitHz, destruction); }
@@ -78,6 +79,8 @@ private:
     bool bassEnabled = true, guitarEnabled = true, routingConfigured = false;
     bool bassSuspended = false, guitarSuspended = false;
     dsp_core::LinearRamp bassFade, guitarFade, bassBendOffset;
+    dsp_core::LinearRamp bassMixLevel, guitarMixLevel;
+    double bassMixTarget = 1.0, guitarMixTarget = 1.0;
     static_assert(GuitarBus::latencySamples == latencySamples, "layer latency must agree");
     int bassChannel = 1; // Retain selected bend during the note-off release.
     BassNotes bassNotes;

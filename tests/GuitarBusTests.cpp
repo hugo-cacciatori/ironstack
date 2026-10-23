@@ -9,7 +9,7 @@
 namespace
 {
 constexpr double pi = 3.14159265358979323846;
-// Reference level for waveform shape after the +3 dB mix lift.
+// Reference level for waveform shape after the fixed mix lift.
 // Absolute peak/headroom and the dedicated Mono control-click gates stay fixed.
 constexpr double waveformReferenceGain = (0.088 * ironstack::outputTrim) / ironstack::GuitarBus::outputGain;
 void require(bool value, const char* message)

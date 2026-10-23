@@ -16,8 +16,8 @@ class GuitarBus
 public:
     static constexpr int latencySamples = dsp_core::DriveChain4x::latencySamples;
     static constexpr double separationHz = 350.0;
-    // Lift the finished Guitar by 3 dB without changing drive interaction or Bass.
-    static constexpr double outputGain = 0.088 * 1.4125375446227544 * outputTrim;
+    // Fixed Swarm balance: +6 dB over the original bus, after tone/drive.
+    static constexpr double outputGain = 0.088 * 1.9952623149688795 * outputTrim;
     static constexpr double finalLowpassHz = 6000.0;
     void prepare(double sampleRate) noexcept
     {

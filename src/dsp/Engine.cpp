@@ -28,7 +28,10 @@ void Engine::reset() noexcept
     bassChannel = 1;
     bassBendOffset.reset(0.0);
     bassNotes.reset();
-    bassNotes.setPolicy(routingConfigured && guitarEnabled ? BassNotes::Policy::lowest : BassNotes::Policy::locked);
+    bassNotes.setPolicy(!routingConfigured ? BassNotes::Policy::locked
+        : guitarEnabled ? BassNotes::Policy::lowest : BassNotes::Policy::newest);
+    bassMixLevel.reset(bassMixTarget);
+    guitarMixLevel.reset(guitarMixTarget);
     bassFade.reset(bassEnabled ? 1.0 : 0.0);
     guitarFade.reset(guitarEnabled ? 1.0 : 0.0);
     bassSuspended = !bassEnabled;
@@ -55,7 +58,7 @@ void Engine::setLayersEnabled(bool bass, bool guitar) noexcept
     const auto guitarWasEnabled = guitarEnabled;
     bassEnabled = bass;
     guitarEnabled = guitar;
-    const auto change = bassNotes.setPolicy(guitar ? BassNotes::Policy::lowest : BassNotes::Policy::locked);
+    const auto change = bassNotes.setPolicy(guitar ? BassNotes::Policy::lowest : BassNotes::Policy::newest);
     if (bass != bassWasEnabled)
     {
         bassFade.setTarget(bass ? 1.0 : 0.0, fadeSamples);
@@ -186,6 +189,18 @@ void Engine::pitchBend(int channel, int wheel) noexcept
     }
 }
 
+void Engine::setLayerLevels(float bassDb, float guitarDb) noexcept
+{
+    const auto gain = [](float db) noexcept
+    {
+        db = std::isfinite(db) ? std::clamp(db, -60.0f, 6.0f) : 0.0f;
+        return db <= -60.0f ? 0.0 : std::pow(10.0, db / 20.0);
+    };
+    const auto bass = gain(bassDb), guitar = gain(guitarDb);
+    if (bass != bassMixTarget) { bassMixTarget = bass; bassMixLevel.setTarget(bass, fadeSamples); }
+    if (guitar != guitarMixTarget) { guitarMixTarget = guitar; guitarMixLevel.setTarget(guitar, fadeSamples); }
+}
+
 void Engine::process(float* left, float* right, int numSamples, LayerMask outputMask, LayerTaps taps,
                      BassComponent component) noexcept
 {
@@ -195,10 +210,10 @@ void Engine::process(float* left, float* right, int numSamples, LayerMask output
         for (std::size_t channel = 0; channel < bend.size(); ++channel)
             ratios[channel] = bend[channel].next();
         const auto guitar = guitarSuspended ? GuitarOscillators::Stereo{} : nextGuitar(ratios);
-        const auto guitarGain = guitarFade.next();
+        const auto guitarGain = guitarFade.next() * guitarMixLevel.next();
         const auto guitarLeft = static_cast<float>(guitar.left * guitarGain);
         const auto guitarRight = static_cast<float>(guitar.right * guitarGain);
-        const auto bassGain = bassFade.next();
+        const auto bassGain = bassFade.next() * bassMixLevel.next();
         const auto bass = bassSuspended ? 0.0f : static_cast<float>(bassGain *
             bassVoice.next(ratios[static_cast<std::size_t>(bassChannel - 1)] + bassBendOffset.next(), component).output);
         // Once inaudible, discard histories and stop synthesis. MIDI tracking

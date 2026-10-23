@@ -12,7 +12,7 @@ namespace ironstack
 class BassNotes
 {
 public:
-    enum class Policy { locked, lowest };
+    enum class Policy { locked, lowest, newest };
     enum class Change { none, attack, release, retarget };
     struct Target
     {
@@ -50,6 +50,14 @@ public:
         for (std::size_t i = 0; i < count; ++i)
             if (held[i].channel == channel && held[i].note == note)
             {
+                if (policy == Policy::newest)
+                {
+                    // A repeated press becomes newest without growing the ledger.
+                    erase(i);
+                    held[count++] = {channel, note, std::min(velocity, 127)};
+                    const auto change = reselect(previous);
+                    return change == Change::none ? Change::attack : change;
+                }
                 held[i].velocity = std::min(velocity, 127);
                 // Repeated selected note-ons articulate again; no stacked key counts.
                 return i == selected ? Change::attack : Change::none;
@@ -82,14 +90,14 @@ public:
 private:
     Change reselect(const Target& previous) noexcept
     {
-        selected = 0;
+        selected = policy == Policy::newest && count > 0 ? count - 1 : 0;
         for (std::size_t i = 0; i < count; ++i)
         {
             if (policy == Policy::lowest)
             {
                 if (held[i].note < held[selected].note) selected = i;
             }
-            else if (held[i].channel == previous.channel && held[i].note == previous.note)
+            else if (policy == Policy::locked && held[i].channel == previous.channel && held[i].note == previous.note)
             {
                 selected = i;
                 break;

@@ -56,6 +56,40 @@ Frame next(Engine& engine, LayerMask mask = LayerMask::both)
 }
 void advance(Engine& engine, int count) { while (count-- > 0) next(engine); }
 
+void layerLevels()
+{
+    for (const double rate : {44100.0, 48000.0, 192000.0})
+    {
+        Engine actual, reference;
+        for (auto* engine : {&actual, &reference})
+        {
+            engine->setLayersEnabled(true, true); engine->prepare(rate);
+            engine->noteOn(1, 52, 127); advance(*engine, 2048);
+        }
+        forbidAllocation = true;
+        actual.setLayerLevels(-6.0f, -60.0f);
+        const auto fade = static_cast<int>(std::ceil(rate * 0.005));
+        for (int i = 0; i < fade + 128; ++i)
+        {
+            const auto a = next(actual), b = next(reference);
+            const auto phase = std::min(1.0, static_cast<double>(i) / fade);
+            require(std::abs(a.bass - b.bass * (1.0 + (std::pow(10.0, -6.0 / 20.0) - 1.0) * phase)) < 3e-8,
+                "Foundation level follows the prepared 5 ms ramp and stays exactly mono");
+            require(std::abs(a.guitarLeft - b.guitarLeft * (1.0 - phase)) < 3e-8,
+                "Swarm mute endpoint follows its independent level ramp");
+            if (i >= fade) require(a.guitarLeft == 0 && a.guitarRight == 0, "minus infinity level reaches exact silence");
+            require(a.left == a.bass + a.guitarLeft && a.right == a.bass + a.guitarRight, "level taps reconstruct output");
+        }
+        actual.setLayerLevels(0, 0);
+        for (int i = 0; i < fade + 128; ++i)
+        {
+            const auto a = next(actual), b = next(reference);
+            if (i >= fade) require(a.left == b.left && a.right == b.right, "unity level restores original samples without synthesis reset");
+        }
+        forbidAllocation = false;
+    }
+}
+
 void modeExamples()
 {
     for (const bool bass : {false, true}) for (const bool guitar : {false, true})
@@ -68,7 +102,7 @@ void modeExamples()
         if (bass) require(engine.bassTarget().frequency == 110.0, "A3 maps to A2 exactly");
         require(heldGuitar(engine) == (guitar ? std::set<int>{57} : std::set<int>{}), "exact single guitar pitch");
         engine.noteOn(1, 60, 90); engine.noteOn(2, 52, 100);
-        if (bass) require(engine.bassTarget().note == (guitar ? 52 : 57), "Both lowest vs Bass locked");
+        if (bass) require(engine.bassTarget().note == 52, "Both lowest and solo newest select the newly pressed low key");
         require(heldGuitar(engine) == (guitar ? std::set<int>{52, 57, 60} : std::set<int>{}), "no automatic guitar chord stacking");
         for (int i = 0; i < 1024; ++i)
         {
@@ -77,7 +111,7 @@ void modeExamples()
             require(guitar || (frame.guitarLeft == 0.0f && frame.guitarRight == 0.0f), "inactive guitar silent");
         }
         engine.noteOff(2, 52);
-        if (bass) require(engine.bassTarget().note == 57, "root release reveals A3");
+        if (bass) require(engine.bassTarget().note == (guitar ? 57 : 60), "release reveals lowest or newest remaining key");
         engine.noteOff(1, 57);
         if (bass) require(engine.bassTarget().note == 60, "last held key becomes root");
         engine.allNotesOff(1);
@@ -182,9 +216,9 @@ void heldReentry()
     advance(engine, 1024);
     engine.setLayersEnabled(true, false);
     engine.noteOn(2, 30, 127);
-    require(engine.bassTarget().note == 40, "Both to Bass locks current root against new lower key");
+    require(engine.bassTarget().note == 30, "solo mode follows a new key immediately");
     engine.noteOff(1, 40);
-    require(engine.bassTarget().note == 41, "Bass handover uses oldest held key");
+    require(engine.bassTarget().note == 30, "non-selected release leaves newest root alone");
     engine.setLayersEnabled(true, true);
     require(engine.bassTarget().note == 30, "returning to Both recomputes lower held root");
     engine.setLayersEnabled(false, false); advance(engine, 1024);
@@ -334,6 +368,7 @@ std::array<std::vector<float>, 2> sequence(double rate, int block, LayerMask mas
 
 int main()
 {
+    layerLevels();
     modeExamples(); heldReentry(); ownership(); allocationCheck();
     double worst = 0.0;
     for (const auto rate : {44100.0, 48000.0, 88200.0, 96000.0, 176400.0, 192000.0})
