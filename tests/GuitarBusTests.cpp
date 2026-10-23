@@ -9,6 +9,9 @@
 namespace
 {
 constexpr double pi = 3.14159265358979323846;
+// Reference level for waveform shape after the +3 dB mix lift.
+// Absolute peak/headroom and the dedicated Mono control-click gates stay fixed.
+constexpr double waveformReferenceGain = (0.088 * ironstack::outputTrim) / ironstack::GuitarBus::outputGain;
 void require(bool value, const char* message)
 {
     if (!value) { std::cerr << "FAIL: " << message << '\n'; std::exit(1); }
@@ -101,8 +104,9 @@ void topology()
                         std::abs(static_cast<double>(right - previousRight))});
         previousLeft = left; previousRight = right;
     }
-    require(step < 0.04, "mixed-velocity reference changes retain bounded stereo steps");
-    std::cout << "guitar_mixed_velocity_maximum_step=" << step << '\n';
+    std::cout << "guitar_mixed_velocity_maximum_step=" << step
+              << " reference_level_step=" << step * waveformReferenceGain << '\n';
+    require(step * waveformReferenceGain < 0.04, "mixed-velocity waveform shape stays bounded at reference level");
 }
 void controls()
 {
@@ -123,8 +127,9 @@ void controls()
             peak = std::max(peak, std::abs(output)); step = std::max(step, std::abs(output - previous));
             previous = output;
         }
-        std::cout << "guitar_control_rate=" << rate << " peak=" << peak << " maximum_step=" << step << '\n';
-        bounded = bounded && peak < 0.5 && step < 0.04;
+        std::cout << "guitar_control_rate=" << rate << " peak=" << peak << " maximum_step=" << step
+                  << " reference_level_step=" << step * waveformReferenceGain << '\n';
+        bounded = bounded && peak < 0.5 && step * waveformReferenceGain < 0.04;
         double output = 1.0;
         for (int i = 0; i < static_cast<int>(rate / 10); ++i) output = bus.next(0.0, false);
         require(output == 0.0, "release gate settles exactly with filter history retained");

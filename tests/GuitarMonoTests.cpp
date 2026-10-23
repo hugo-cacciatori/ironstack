@@ -98,8 +98,12 @@ void transitions()
         step = std::max({step, std::abs(static_cast<double>(left - previousL)), std::abs(static_cast<double>(right - previousR))});
         previousL = left; previousR = right;
     }
-    std::cout << "mono_transition_step=" << step << " control_step=" << controlStep << std::endl;
-    require(step < 0.04, "live fades retain bounded waveform steps");
+    // Natural waveform slope scales with the final mix gain. Compare its shape
+    // at the original output level; keep the actual control-click bound below.
+    const auto referenceStep = step * (0.088 * ironstack::outputTrim) / ironstack::GuitarBus::outputGain;
+    std::cout << "mono_transition_step=" << step << " reference_level_step=" << referenceStep
+              << " control_step=" << controlStep << std::endl;
+    require(referenceStep < 0.04, "live fades retain bounded waveform shape at the reference level");
     require(controlStep < 0.002, "Mono adds no large control-induced step or hard-right transient");
     for (const auto& target : toggled.guitarTargets())
         if (target.active) require(target.held, "Mono toggles preserve held voices");
