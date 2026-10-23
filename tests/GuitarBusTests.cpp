@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <complex>
 #include <iostream>
 #include <limits>
 
@@ -24,15 +25,27 @@ double response(double frequency, double rate, double tight)
     }
     return std::sqrt(4.0 * power / rate) / ironstack::GuitarBus::outputGain;
 }
+// Independent RBJ transfer function for the fixed pre-drive contour. At zero
+// drive it multiplies the original chain response; retain the original HP/LP
+// gates after removing this known factor rather than broadening their limits.
+double contourGain(double frequency, double rate)
+{
+    const auto a = std::pow(10.0, 3.0 / 40.0);
+    const auto omega = 2.0 * pi * 2800.0 / rate;
+    const auto alpha = std::sin(omega) / (2.0 * 0.7);
+    const auto z = std::polar(1.0, -2.0 * pi * frequency / rate);
+    return std::abs(((1.0 + alpha * a) - 2.0 * std::cos(omega) * z + (1.0 - alpha * a) * z * z)
+                  / ((1.0 + alpha / a) - 2.0 * std::cos(omega) * z + (1.0 - alpha / a) * z * z));
+}
 void filters()
 {
     for (const auto rate : {44100.0, 48000.0, 96000.0, 192000.0})
     {
-        const auto body = response(1000.0, rate, 0.5);
+        const auto body = response(1000.0, rate, 0.5) / contourGain(1000.0, rate);
         const auto low = response(50.0, rate, 0.5);
-        const auto focus = response(1800.0, rate, 0.5);
-        const auto edge = response(6000.0, rate, 0.5);
-        const auto fizz = response(9000.0, rate, 0.5);
+        const auto focus = response(1800.0, rate, 0.5) / contourGain(1800.0, rate);
+        const auto edge = response(6000.0, rate, 0.5) / contourGain(6000.0, rate);
+        const auto fizz = response(9000.0, rate, 0.5) / contourGain(9000.0, rate);
         const auto loose = response(120.0, rate, 0.0);
         const auto tight = response(120.0, rate, 1.0);
         require(body > 1.4 && body < 1.6 && focus > 1.9 && focus < 2.01,

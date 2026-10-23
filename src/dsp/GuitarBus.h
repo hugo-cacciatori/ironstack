@@ -24,6 +24,9 @@ public:
         smoothingSamples = static_cast<int>(std::ceil(rate * 0.010));
         driveChain.prepare(rate);
         tightFilter.prepare(dsp_core::Butterworth::Type::highpass, cutoff(tightTarget), rate);
+        // Feed upper-mid harmonics into the shared drive before its stages
+        // interact, rather than relying solely on the final presence boost.
+        preDriveContour.prepare(2800.0, 3.0, 0.7, rate);
         // These unequal Qs form a true fourth-order Butterworth, rather than
         // two identical sections (which would be Linkwitz-Riley).
         highpass[0].prepare(dsp_core::Butterworth::Type::highpass, separationHz, rate, 0.541196100146197);
@@ -36,7 +39,7 @@ public:
     }
     void reset() noexcept
     {
-        driveChain.reset(); tightFilter.reset(); lowpass.reset(); presence.reset();
+        driveChain.reset(); tightFilter.reset(); lowpass.reset(); presence.reset(); preDriveContour.reset();
         for (auto& filter : highpass) filter.reset();
         tight.reset(tightTarget); drive.reset(driveTarget); currentCutoff = -1.0;
         alignedGate.reset(); alignedLevel.reset();
@@ -63,7 +66,7 @@ public:
         const auto amount = drive.next();
         // Drive the unscaled note sum. Restrict the core range to keep high-note
         // fold products out of the bass band and bound default chord steps.
-        auto sample = driveChain.next(tightFilter.next(input), 0.85 * amount);
+        auto sample = driveChain.next(preDriveContour.next(tightFilter.next(input)), 0.85 * amount);
         for (auto& filter : highpass) sample = filter.next(sample);
         // Full folding sharpens transitions. Trim only its upper-quarter range
         // using the already-smoothed drive; zero/default drive retain their gain.
@@ -80,7 +83,7 @@ private:
     }
     dsp_core::DriveChain4x driveChain;
     dsp_core::Butterworth tightFilter, highpass[2], lowpass;
-    dsp_core::PeakingEq presence;
+    dsp_core::PeakingEq presence, preDriveContour;
     dsp_core::LinearRamp tight, drive;
     dsp_core::FixedDelay<double, latencySamples> alignedGate, alignedLevel;
     double rate = 44100.0, tightTarget = 0.5, driveTarget = 0.5, currentCutoff = -1.0;

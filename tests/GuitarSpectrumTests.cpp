@@ -8,7 +8,7 @@
 
 namespace
 {
-constexpr int stages = 7;
+constexpr int stages = 8;
 using Frame = std::array<double, stages>;
 struct ObservedDrive
 {
@@ -48,7 +48,7 @@ struct ObservedDrive
 struct ObservedBus
 {
     dsp_core::Butterworth tight, hp[2], lp;
-    dsp_core::PeakingEq presence;
+    dsp_core::PeakingEq presence, preDriveContour;
     dsp_core::DriveChain4x drive;
     ObservedDrive observedDrive;
     dsp_core::FixedDelay<double, ironstack::GuitarBus::latencySamples> gate;
@@ -58,6 +58,7 @@ struct ObservedBus
     {
         using Type = dsp_core::Butterworth::Type;
         tight.prepare(Type::highpass, 120.0, rate);
+        preDriveContour.prepare(2800.0, 3.0, 0.7, rate);
         hp[0].prepare(Type::highpass, ironstack::GuitarBus::separationHz, rate, 0.541196100146197);
         hp[1].prepare(Type::highpass, ironstack::GuitarBus::separationHz, rate, 1.306562964876377);
         presence.prepare(1800.0, 6.0, 0.7, rate);
@@ -70,21 +71,22 @@ struct ObservedBus
         Frame f{};
         f[0] = input;
         f[1] = tight.next(input);
-        f[2] = drive.next(f[1], 0.85 * amount);
-        const auto reconstructedDrive = observedDrive.next(f[1], 0.85 * amount);
-        if (!std::isfinite(reconstructedDrive) || !std::isfinite(f[2]))
+        f[2] = preDriveContour.next(f[1]);
+        f[3] = drive.next(f[2], 0.85 * amount);
+        const auto reconstructedDrive = observedDrive.next(f[2], 0.85 * amount);
+        if (!std::isfinite(reconstructedDrive) || !std::isfinite(f[3]))
             throw std::runtime_error("nonfinite drive");
-        error = std::max(error, std::abs(reconstructedDrive - f[2]));
-        f[3] = hp[1].next(hp[0].next(f[2]));
-        f[4] = presence.next(f[3]);
-        f[5] = lp.next(f[4]);
+        error = std::max(error, std::abs(reconstructedDrive - f[3]));
+        f[4] = hp[1].next(hp[0].next(f[3]));
+        f[5] = presence.next(f[4]);
+        f[6] = lp.next(f[5]);
         const auto compensation = 1.0 / (1.0 + 0.8 * std::max(0.0, 4.0 * amount - 3.0));
-        f[6] = ironstack::GuitarBus::outputGain * compensation * f[5]
+        f[7] = ironstack::GuitarBus::outputGain * compensation * f[6]
             * gate.next(std::clamp(envelope * 6.0, 0.0, 1.0));
         const auto reference = actual.next(input, envelope);
         for (auto value : f) if (!std::isfinite(value)) throw std::runtime_error("nonfinite stage");
         if (!std::isfinite(reference)) throw std::runtime_error("nonfinite bus");
-        error = std::max(error, std::abs(f[6] - reference));
+        error = std::max(error, std::abs(f[7] - reference));
         return f;
     }
 };
@@ -94,7 +96,7 @@ constexpr std::array<Phrase, 5> phrases{{
     {"dense", {40, 47, 52, 55, 59, 64, 67, 71}, 8, false},
     {"chops", {40, 47, 52, 55}, 4, true}}};
 constexpr std::array<const char*, stages> names{
-    "source", "tight", "drive", "separation", "presence", "lowpass", "width_output"};
+    "source", "tight", "pre_contour", "drive", "separation", "presence", "lowpass", "width_output"};
 constexpr std::array<const char*, 6> internalNames{
     "upsampled4x", "soft4x", "interstage4x", "hard4x", "fold4x", "dc4x"};
 
@@ -131,9 +133,9 @@ void measure(double rate, double amount, const Phrase& phrase, double& error)
             sum.left += s.left * env; sum.right += s.right * env;
         }
         auto l = left.next(sum.left, env, error), r = right.next(sum.right, env, error);
-        const auto mid = 0.5 * (l[6] + r[6]);
-        const auto side = 0.5 * (l[6] - r[6]) * ironstack::GuitarOscillators::spread;
-        l[6] = mid + side; r[6] = mid - side;
+        const auto mid = 0.5 * (l[7] + r[7]);
+        const auto side = 0.5 * (l[7] - r[7]) * ironstack::GuitarOscillators::spread;
+        l[7] = mid + side; r[7] = mid - side;
         if (i < begin) continue;
         // Hann on held segments avoids interpreting cut-window leakage as air.
         // Chops include their real attack/release energy, rectangularly windowed.
