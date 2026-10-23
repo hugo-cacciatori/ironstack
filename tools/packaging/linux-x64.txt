@@ -1,0 +1,27 @@
+Ironstack development build - Linux x64
+
+Built on Ubuntu 24.04 x64; older glibc distributions are not validated.
+Contents: compiled VST3 bundle and Standalone, provenance, checksums and notices.
+M3 adds centered octave-down bass, a clean sine and oversampled upper drive.
+Controls: Output/Split/Destruction (double-click numerical entry) and Panic.
+Guitar uses eight stereo unison voices. Latency: 32 samples. Guitar drive/filters,
+final modes/UI and FX remain future
+work; the high-note max-drive alias target remains open for M5.
+
+Extract the tar.gz preserving executable permissions. Copy the entire
+Ironstack.vst3 folder to ~/.vst3 and rescan your host. Run ./Ironstack for the
+Standalone and choose audio/MIDI devices in its settings. An X11 display or
+compatible XWayland session and ALSA are required. System runtime libraries
+(glibc/libstdc++, X11, ALSA, FreeType and fontconfig) are not bundled; see
+ci-environment.txt for the exact build environment. No JACK/browser is required.
+You may replace the LGPL system libraries and reverse-engineer this program
+as needed to debug modifications to those libraries. These instructions do not
+restrict those LGPL rights; the libraries remain separate and replaceable.
+
+CI verifies build/tests under Xvfb, not physical audio devices or DAW playback.
+No Linux DAW/listening acceptance is claimed. No runtime networking is used.
+
+Free binary use permissions and source rights reservation: PROJECT-LICENSE.txt.
+Portions of this software use the FreeType Project (https://freetype.org).
+Third-party rights/notices are in notices/. This software is based in part on
+the work of the Independent JPEG Group. Build provenance is in build-info.json.

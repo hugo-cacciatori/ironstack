@@ -1,0 +1,38 @@
+# CMake build trees and generated files
+/build/
+/build-*/
+/cmake-build-*/
+/out/
+CMakeUserPresets.json
+
+# IDE and operating-system files
+.vs/
+*.user
+*.suo
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Optional Python analysis environments and caches
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+
+# Local secrets and tool settings
+.env
+.env.*
+!.env.example
+.claude/settings.local.json
+
+# AI-agent files and project docs: private, never public (owner, 2026-10-23)
+AGENTS.md
+CLAUDE.md
+CLAUDE.local.md
+.claude/
+.git-docs/
+/docs/*
+!/docs/test-sequences/
+!/docs/notices/
+!/docs/dependencies.md
+!/docs/build.md

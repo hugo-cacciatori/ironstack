@@ -1,0 +1,38 @@
+OFFLINE REGRESSION TOOLS
+
+The render_tool executable is a local command-line developer tool, separate
+from the VST3/Standalone. It needs no DAW, audio device or networking.
+
+Windows PowerShell (from the extracted package directory):
+  .\render_tool.exe regression\low-riff.mid new.wav new.json
+Linux/macOS shell:
+  ./render_tool regression/low-riff.mid new.wav new.json
+
+Use new output names in an existing directory; existing files are refused.
+Use --help for sample-rate, block-size, Output, tail and bass control options.
+Defaults: 48000 Hz, block 512, Output 0 dB, tail 0.1 seconds, Split 140 Hz,
+Destruction 0.5, both layers enabled (Both routing), layer mask both. Latency is 32 samples, left in the WAV.
+To isolate bass, append --layer-mask bass. This diagnostic output mask does
+not change note selection or pause the hidden guitar; it is not a playing mode.
+Use --split-hz 80..250 and --destruction 0..1 for reproducible bass settings.
+WAV output is stereo float32, not normalized. JSON records measured levels,
+finite/clipping counts and source provenance. Changing a block size does not
+change the WAV samples for identical inputs/settings in the same build.
+
+Use --bass-enabled 0|1 and --guitar-enabled 0|1 for Both/Bass/Guitar/Off.
+To reproduce locked Bass mode, append --guitar-enabled 0 --layer-mask bass.
+JSON records both enable settings separately from the output mask.
+The plugin uses the same layer enables and defaults to Both routing.
+
+bass-regression/ contains the same five MIDI sequences in locked Bass mode;
+regression/ records the mixed results. Each has MIDI inputs, JSON measurements,
+audio-sha256.json, summary.json and readable fixtures.json; no WAVs are bundled.
+Render temporarily to check the recorded hashes, then delete the audio.
+These are automated development tests,
+not plugin musical patterns or required owner auditions. Use your own MIDI in
+REAPER as usual; listening to these files is optional.
+
+SHA256SUMS.txt covers the renderer and all regression payloads. build-info.json
+identifies the compiled source/version/platform. Keep PROJECT-LICENSE.txt and
+notices alongside these files; those permissions govern any redistribution.
+Linux/macOS build/test evidence does not establish DAW compatibility.

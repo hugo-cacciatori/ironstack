@@ -1,0 +1,31 @@
+Ironstack development build - Windows x64
+
+Contents: compiled VST3 bundle, Standalone executable, source/build manifest,
+checksums, test evidence and third-party notices. M3 adds centered octave-down
+bass with a clean sine foundation and oversampled upper drive. Prototype controls
+are Output, Split, Destruction and Panic; double-click knobs for numerical entry.
+
+VST3: copy the entire Ironstack.vst3 folder into
+C:\Program Files\Common Files\VST3, or a custom VST3 folder supported by your host.
+Rescan plugins in REAPER and load Ironstack as an instrument.
+Standalone: extract first, then launch Ironstack.exe. Select an audio device and
+MIDI input in its audio/MIDI settings. No networking is needed at runtime.
+
+Windows 10/11 x64: install Microsoft's no-cost supported Visual C++ v14 x64
+Redistributable if Windows reports a missing vcruntime/msvcp DLL. Obtain it from
+https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist
+The runtime is not bundled. Do not download individual DLLs from third parties.
+
+Unsigned development binaries may prompt Windows security checks. No signing
+certificate is required or purchased. Inspect provenance/checksums before use.
+M1 oscillator baseline accepted after owner REAPER playback/clean note release;
+remaining manual Panic/Output recall/velocity/bend checks explicitly waived.
+M3 bass A accepted by owner; no new REAPER manual checks claimed. FL Studio is
+unverified (owner has no license). Guitar now uses eight stereo unison voices;
+guitar drive/filters, playing-mode UI, lowest-root Both routing and FX are future
+work. High-note max-drive alias target remains open for M5. Stable latency: 32
+samples. This is a Windows x64 development prerelease, not a finished synth.
+
+Free binary use permissions and source rights reservation: PROJECT-LICENSE.txt.
+Third-party rights/notices are in notices/. This software is based in part on
+the work of the Independent JPEG Group. Build provenance is in build-info.json.

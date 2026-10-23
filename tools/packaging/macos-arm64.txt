@@ -1,0 +1,25 @@
+Ironstack development build - macOS Apple silicon (arm64)
+
+Built on macOS 15 for Apple silicon with deployment target macOS 12.0.
+Older systems and Intel Macs are not validated. The package contains a compiled
+VST3 bundle and Ironstack.app, provenance, checksums and third-party notices.
+M3 adds centered octave-down bass, a clean sine and oversampled upper drive.
+Controls: Output/Split/Destruction (double-click numerical entry) and Panic.
+Guitar uses eight stereo unison voices. Latency: 32 samples. Guitar drive/filters,
+final modes/UI and FX remain future
+work; the high-note max-drive alias target remains open for M5.
+
+Extract the tar.gz preserving app/bundle structure and executable permissions.
+Copy the entire Ironstack.vst3 bundle to ~/Library/Audio/Plug-Ins/VST3 and rescan
+your VST3 host. Copy Ironstack.app to a folder of your choice for Standalone.
+Choose audio and MIDI devices in its settings. No runtime networking is used.
+
+Development build only: no Developer ID certificate/notarization is provided or
+purchased. macOS may block downloaded apps/plugins. Review provenance/checksums;
+use macOS Privacy & Security controls only if you trust this build. Do not disable
+system security globally. A paid Apple developer account is not required to build.
+
+CI is not validation of DAW installation, playback or owner listening acceptance.
+Free binary use permissions and source rights reservation: PROJECT-LICENSE.txt.
+Third-party rights/notices are in notices/. This software is based in part on
+the work of the Independent JPEG Group. Build provenance is in build-info.json.
