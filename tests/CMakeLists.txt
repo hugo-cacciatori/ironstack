@@ -22,6 +22,11 @@ add_executable(ironstack_guitar_bus_tests GuitarBusTests.cpp)
 target_link_libraries(ironstack_guitar_bus_tests PRIVATE ironstack_core)
 add_test(NAME guitar_bus COMMAND ironstack_guitar_bus_tests)
 
+add_executable(ironstack_guitar_spectrum_tests GuitarSpectrumTests.cpp)
+target_include_directories(ironstack_guitar_spectrum_tests PRIVATE "${CMAKE_SOURCE_DIR}/shared/dsp-core/tests")
+target_link_libraries(ironstack_guitar_spectrum_tests PRIVATE ironstack_core)
+add_test(NAME guitar_spectrum COMMAND ironstack_guitar_spectrum_tests)
+
 add_executable(ironstack_guitar_mix_tests GuitarMixTests.cpp)
 target_include_directories(ironstack_guitar_mix_tests PRIVATE "${CMAKE_SOURCE_DIR}/shared/dsp-core/tests")
 target_compile_definitions(ironstack_guitar_mix_tests PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0
