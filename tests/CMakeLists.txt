@@ -3,6 +3,11 @@ target_include_directories(ironstack_diffuse_source_tests PRIVATE "${CMAKE_SOURC
 target_link_libraries(ironstack_diffuse_source_tests PRIVATE ironstack_core)
 add_test(NAME diffuse_source_calibration COMMAND ironstack_diffuse_source_tests)
 
+add_executable(ironstack_register_balance_tests RegisterBalanceTests.cpp)
+target_link_libraries(ironstack_register_balance_tests PRIVATE ironstack_core)
+add_test(NAME register_balance COMMAND ironstack_register_balance_tests)
+set_tests_properties(register_balance PROPERTIES TIMEOUT 240)
+
 add_executable(ironstack_diffuse_integration_tests DiffuseIntegrationTests.cpp)
 target_include_directories(ironstack_diffuse_integration_tests PRIVATE "${CMAKE_SOURCE_DIR}/shared/dsp-core/tests")
 target_link_libraries(ironstack_diffuse_integration_tests PRIVATE ironstack_core)
