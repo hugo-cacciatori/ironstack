@@ -51,8 +51,8 @@ void requireSilence(ironstack::Engine& engine)
 double targetPitch(ironstack::Engine& engine)
 {
     render(engine, 2400); // Settle the same channel bend ramp as the audible path.
-    // Unison has intentional sidebands; zero crossings no longer measure its
-    // MIDI pitch. GuitarTests separately measures the synthesized spectral lines.
+    // A diffuse source has no note period. Measure exact MIDI register targets;
+    // the source/integration suites separately measure spectral character.
     for (const auto& target : engine.guitarTargets())
         if (target.active) return target.frequency;
     require(false, "pitch diagnostic needs an active note");
@@ -218,19 +218,21 @@ void polyphonyAndRetriggers()
 
     engine.prepare(48000.0);
     engine.noteOn(1, 33, 127);
-    auto previous = render(engine, 512).back();
+    render(engine, 512);
     double maximumStep = 0.0;
     for (int iteration = 0; iteration < 1000; ++iteration)
     {
+        auto continuing = engine;
         engine.noteOn(1, 33, 127);
-        previous = render(engine, ironstack::Engine::latencySamples).back();
+        render(engine, ironstack::Engine::latencySamples);
+        render(continuing, ironstack::Engine::latencySamples);
         const auto block = render(engine, 3);
-        maximumStep = std::max(maximumStep, std::abs(static_cast<double>(block.front() - previous)));
-        previous = block.back();
+        const auto noEvent = render(continuing,3);
+        maximumStep = std::max(maximumStep, std::abs(static_cast<double>(block.front() - noEvent.front())));
     }
-    // The post-sum FIR/IIR stages continue evolving through the retrigger;
-    // equality with the prior output sample no longer describes continuity.
-    require(maximumStep < 0.01, "filtered rapid retriggers retain a bounded boundary step");
+    // Compare with the same continuing noise sample, not yesterday's unrelated
+    // noise value. Keep the original 0.01 event-induced discontinuity bound.
+    require(maximumStep < 0.01, "filtered rapid retriggers retain a bounded event residual");
     engine.noteOff(1, 33);
     requireSilence(engine);
     std::cout << "rapid_retrigger_boundary_step=" << maximumStep << '\n';

@@ -6,6 +6,7 @@
 #include <complex>
 #include <cstdlib>
 #include <iostream>
+#include <limits>
 #include <vector>
 
 namespace
@@ -39,88 +40,18 @@ double magnitude(const std::vector<float>& samples, double frequency)
 }
 void spectrum()
 {
-    ironstack::Engine engine;
-    engine.prepare(48000);
-    engine.noteOn(1, 69, 127);
-    render(engine, 4800);
-    const auto audio = render(engine, 192000);
-    require(audio.left != audio.right, "guitar is synthesized independently on both sides");
-    for (const auto* side : {&audio.left, &audio.right})
-    {
-        require(magnitude(*side, 440.0) > 0.005, "exact input-pitch anchor is audible on both sides");
-        require(magnitude(*side, 440.0 * std::exp2(-8.0 / 1200.0)) > 0.0005
-                && magnitude(*side, 440.0 * std::exp2(6.16 / 1200.0)) > 0.0005,
-                "narrow unison sidebands, rather than extra chord notes, are present");
-        require(magnitude(*side, 440.0 * std::exp2(7.0 / 12.0)) < 0.00001
-                && magnitude(*side, 220.0) < 0.00001, "guitar adds neither a fifth nor an octave-down note");
-    }
-    // The outer beating components must survive the real summed-bus drive,
-    // rather than existing only in an isolated oscillator measurement.
-    require(magnitude(audio.left, 440.0 * std::exp2(-22.0 / 1200.0)) > 0.0001
-            && magnitude(audio.right, 440.0 * std::exp2(16.94 / 1200.0)) > 0.0001,
-            "outer unison shoulders survive the default drive on both sides");
-    double ll = 0.0, rr = 0.0, lr = 0.0;
-    for (std::size_t i = 0; i < audio.left.size(); ++i)
-    {
-        ll += audio.left[i] * static_cast<double>(audio.left[i]);
-        rr += audio.right[i] * static_cast<double>(audio.right[i]);
-        lr += audio.left[i] * static_cast<double>(audio.right[i]);
-    }
-    std::cout << "guitar_440_anchor_left=" << magnitude(audio.left, 440.0)
-              << " right=" << magnitude(audio.right, 440.0) << " correlation=" << lr / std::sqrt(ll * rr)
-              << " balance_db=" << 10.0 * std::log10(ll / rr) << '\n';
-}
-void octavePresence()
-{
-    double lowestAnchor = 1.0, lowestShoulder = 1.0;
-    for (const auto rate : {44100, 48000, 192000})
-    {
-        ironstack::GuitarOscillators full, base;
-        full.reset(1, 57); base.reset(1, 57);
-        std::array<std::array<std::complex<double>, 9>, 2> bins{};
-        std::array<std::array<double, 9>, 2> frequencies{};
-        for (std::size_t side = 0; side < frequencies.size(); ++side)
-        {
-            frequencies[side] = {220, 330, 440};
-            constexpr std::array<double, 6> cents{-8, 8, -14, 14, -22, 22};
-            for (std::size_t shoulder = 0; shoulder < cents.size(); ++shoulder)
-                frequencies[side][shoulder + 3] = 440 * std::exp2(cents[shoulder]
-                    * (side == 0 ? 1.0 : 0.77) / 1200.0);
-        }
-        for (int i = 0; i < rate*2; ++i)
-        {
-            const auto a = full.next(220.0, rate), b = base.next(220.0, rate, false);
-            const std::array<double, 2> added{a.left-b.left, a.right-b.right};
-            const auto window = 0.5 - 0.5*std::cos(2*pi*i/(rate*2));
-            for (std::size_t side = 0; side < added.size(); ++side)
-                for (std::size_t bin = 0; bin < bins[side].size(); ++bin)
-                    bins[side][bin] += window*added[side]
-                        * std::polar(1.0, -2*pi*frequencies[side][bin]*i/rate);
-        }
-        for (const auto& side : bins)
-        {
-            const auto anchor = std::abs(side[2])*2.0/rate;
-            lowestAnchor = std::min(lowestAnchor, anchor);
-            require(anchor > 0.05, "isolated presence layer has an exact octave-up anchor on each side");
-            require(std::abs(side[0])*2.0/rate < 1e-6 && std::abs(side[1])*2.0/rate < 1e-6,
-                    "added source supplies upper harmonics without a new root or fifth");
-            for (std::size_t bin = 3; bin < side.size(); ++bin)
-            {
-                const auto shoulder = std::abs(side[bin])*2.0/rate;
-                lowestShoulder = std::min(lowestShoulder, shoulder);
-                require(shoulder > 0.004, "all six detuned octave shoulders are present on both sides");
-            }
-        }
-        full.reset(1, 127); base.reset(1, 127);
-        for (int i = 0; i < 4096; ++i)
-        {
-            const auto a = full.next(rate*0.24, rate), b = base.next(rate*0.24, rate, false);
-            require(a.left == b.left && a.right == b.right,
-                    "above-Nyquist octave components disappear instead of sounding a clamped pitch");
-        }
-    }
-    std::cout << "guitar_added_octave_min_anchor=" << lowestAnchor
-              << " min_shoulder=" << lowestShoulder << " high_fade=exact\n";
+    ironstack::Engine engine; engine.prepare(48000); engine.noteOn(1,69,127);
+    render(engine,4800);
+    const auto audio=render(engine,192000);
+    require(audio.left!=audio.right,"diffuse sides are synthesized independently");
+    double ll=0,rr=0,lr=0;
+    for(std::size_t i=0;i<audio.left.size();++i)
+    { ll+=audio.left[i]*static_cast<double>(audio.left[i]); rr+=audio.right[i]*static_cast<double>(audio.right[i]); lr+=audio.left[i]*static_cast<double>(audio.right[i]); }
+    const auto rms=std::sqrt(ll/audio.left.size());
+    require(rms>0.01 && rms<0.3,"Swarm sustains substantial diffuse body");
+    require(magnitude(audio.left,440)<0.02*rms && magnitude(audio.right,440)<0.02*std::sqrt(rr/audio.right.size()),
+            "played pitch is not a persistent carrier in the processed source");
+    std::cout<<"guitar_diffuse_rms="<<rms<<" correlation="<<lr/std::sqrt(ll*rr)<<'\n';
 }
 void targets()
 {
@@ -162,26 +93,14 @@ void bentAudio()
     otherChannel.pitchBend(2, 16383);
     const auto a = render(original, 4800), b = render(otherChannel, 4800, 73);
     require(a.left == b.left && a.right == b.right, "another channel's bend leaves both guitar sides unchanged");
-    otherChannel.pitchBend(1, 16383);
-    render(otherChannel, 4800);
-    const auto bent = render(otherChannel, 192000);
-    const auto frequency = 440.0 * std::exp2(2.0 / 12.0);
-    for (const auto* side : {&bent.left, &bent.right})
-        require(magnitude(*side, frequency) > 0.005 && magnitude(*side, 440.0) < 0.00001,
-                "both output spectra actually follow the correct channel's bend");
-    for (const int note : {48, 72, 96})
-    {
-        original.prepare(48000); original.noteOn(1, note, 127);
-        render(original, 4800);
-        const auto audio = render(original, 192000);
-        const auto hz = 440.0 * std::exp2((note - 69.0) / 12.0);
-        for (const auto* side : {&audio.left, &audio.right})
-            // The separation HP deliberately attenuates low fundamentals; the
-            // exact pitch must still be present rather than a new chord note.
-            require(magnitude(*side, hz) > (hz < ironstack::GuitarBus::separationHz ? 0.0001 : 0.005)
-                    && magnitude(*side, hz * std::exp2(7.0 / 12.0)) < 0.00001,
-                    "multiple played pitches produce their own spectral anchor without a fifth");
-    }
+    otherChannel.pitchBend(1,16383);
+    const auto continued=render(original,48000), bent=render(otherChannel,48000);
+    require(continued.left!=bent.left && continued.right!=bent.right,"owned bend changes broad spectral contour");
+    const auto frequency=440.0*std::exp2(2.0/12.0);
+    bool found=false;
+    for(const auto& target:otherChannel.guitarTargets())
+        if(target.active) { found=true; require(std::abs(target.frequency-frequency)<1e-9,"bent MIDI target remains exact"); }
+    require(found,"bend retains its playable voice");
 }
 void repeatability()
 {
@@ -194,8 +113,12 @@ void repeatability()
     b.noteOn(1, 69, 127); reference.noteOn(1, 60, 127); // Both get slot 0.
     const auto chord = render(a, 48000, 1), single = render(b, 48000, 73), other = render(reference, 48000, 512);
     for (std::size_t i = 0; i < chord.left.size(); ++i)
-        require(std::abs(chord.left[i] - single.left[i] - other.left[i]) < 2.0e-8f
-                && std::abs(chord.right[i] - single.right[i] - other.right[i]) < 2.0e-8f,
+        // Three final float roundings scale with the signal's magnitude.
+        // A fixed 2e-8 bound can be smaller than one ULP of a broad source.
+        require(std::abs(static_cast<double>(chord.left[i]) - single.left[i] - other.left[i])
+                    <= std::numeric_limits<float>::epsilon()*(std::abs(chord.left[i])+std::abs(single.left[i])+std::abs(other.left[i]))+1e-12
+                && std::abs(static_cast<double>(chord.right[i]) - single.right[i] - other.right[i])
+                    <= std::numeric_limits<float>::epsilon()*(std::abs(chord.right[i])+std::abs(single.right[i])+std::abs(other.right[i]))+1e-12,
                 "at zero drive the filtered chord is the sum of slot-independent notes");
     a.prepare(48000); b.prepare(48000);
     for (auto* engine : {&a, &b})
@@ -211,6 +134,6 @@ void repeatability()
 }
 int main()
 {
-    targets(); spectrum(); bentAudio(); repeatability(); octavePresence();
+    targets(); spectrum(); bentAudio(); repeatability();
     std::cout << "guitar_notes=8 pitches=0..127 allocation=deterministic stereo_repeat=exact\n";
 }

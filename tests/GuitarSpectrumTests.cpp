@@ -103,6 +103,7 @@ constexpr std::array<const char*, 6> internalNames{
 void measure(double rate, double amount, const Phrase& phrase, double& error)
 {
     std::array<ironstack::GuitarOscillators, 8> voices;
+    for (auto& voice : voices) voice.prepare(rate);
     dsp_core::FixedEnvelope envelope;
     envelope.prepare(static_cast<int>(std::ceil(rate * 0.001)), static_cast<int>(std::ceil(rate * 0.006)));
     auto start = [&] {
@@ -129,7 +130,7 @@ void measure(double rate, double amount, const Phrase& phrase, double& error)
         {
             if (!envelope.active()) continue;
             const auto hz = 440.0 * std::exp2((phrase.notes[v] - 69) / 12.0);
-            const auto s = voices[v].next(hz, rate);
+            const auto s = voices[v].next(hz);
             sum.left += s.left * env; sum.right += s.right * env;
         }
         auto l = left.next(sum.left, env, error), r = right.next(sum.right, env, error);
@@ -175,7 +176,11 @@ void measure(double rate, double amount, const Phrase& phrase, double& error)
         // bus gain. Absolute band power also permits stage-to-stage loss checks.
         const auto norm = static_cast<double>(L.size()) * signal[0].size();
         double windowPower = 1.0;
-        if (!phrase.chopped) windowPower = 0.375 * (audio[s][0].size() - 1.0) / audio[s][0].size();
+        // The same base-rate Hann weight is repeated for all four internal
+        // subsamples, so its mean-square power uses the base frame count.
+        // Never index the eight base-stage arrays with an internal-stage ID.
+        const auto baseFrames = audio[0][0].size();
+        if (!phrase.chopped) windowPower = 0.375 * (baseFrames - 1.0) / baseFrames;
         std::cout << rate << ',' << amount << ',' << phrase.name << ','
             << (s < stages ? names[s] : internalNames[s - stages]);
         for (const auto p : power) std::cout << ',' << dsp_core::test::powerDb(p / (norm * windowPower));

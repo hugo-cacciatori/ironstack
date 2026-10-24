@@ -43,6 +43,7 @@ void Engine::clearGuitar() noexcept
     for (auto& voice : voices)
     {
         voice = Voice{};
+        voice.oscillators.prepare(rate);
         voice.envelope.prepare(attackSamples, releaseSamples);
     }
     for (auto& bus : guitarBus) bus.reset();
@@ -248,7 +249,7 @@ GuitarOscillators::Stereo Engine::nextGuitar(const std::array<double, 16>& ratio
             voice.lastOutput = {};
             continue;
         }
-        auto output = voice.oscillators.next(voice.frequency * ratios[static_cast<std::size_t>(voice.channel - 1)], rate);
+        auto output = voice.oscillators.next(voice.frequency * ratios[static_cast<std::size_t>(voice.channel - 1)]);
         const auto envelope = voice.envelope.next();
         guitarVelocity = std::max(guitarVelocity, voice.velocity);
         guitarEnvelope = std::max(guitarEnvelope, envelope);

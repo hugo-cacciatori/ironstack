@@ -93,20 +93,31 @@ void topology()
     chord.reset();
     chord.noteOn(1, 52, 32);
     float previousLeft = 0.0f, previousRight = 0.0f;
-    double step = 0.0;
+    double step = 0.0, eventStep = 0.0;
+    auto continuing = chord;
+    int eventRemaining = 0;
     for (int i = 0; i < 48000; ++i)
     {
-        if (i % 4800 == 1000) chord.noteOn(1, 59, 127);
-        if (i % 4800 == 3000) chord.noteOff(1, 59);
+        if (i % 4800 == 1000 || i % 4800 == 3000)
+        {
+            continuing = chord;
+            eventRemaining = ironstack::Engine::latencySamples + 2;
+            if (i % 4800 == 1000) chord.noteOn(1,59,127); else chord.noteOff(1,59);
+        }
         float left, right;
         chord.process(&left, &right, 1, ironstack::LayerMask::guitar);
+        if(eventRemaining-- > 0)
+        {
+            float a,b; continuing.process(&a,&b,1,ironstack::LayerMask::guitar);
+            eventStep=std::max({eventStep,std::abs(static_cast<double>(left-a)),std::abs(static_cast<double>(right-b))});
+        }
         step = std::max({step, std::abs(static_cast<double>(left - previousLeft)),
                         std::abs(static_cast<double>(right - previousRight))});
         previousLeft = left; previousRight = right;
     }
     std::cout << "guitar_mixed_velocity_maximum_step=" << step
-              << " reference_level_step=" << step * waveformReferenceGain << '\n';
-    require(step * waveformReferenceGain < 0.04, "mixed-velocity waveform shape stays bounded at reference level");
+              << " reference_level_step=" << step * waveformReferenceGain << " event_residual="<<eventStep*waveformReferenceGain<<'\n';
+    require(eventStep * waveformReferenceGain < 0.04, "mixed-velocity event boundary stays bounded at reference level");
 }
 void controls()
 {

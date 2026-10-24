@@ -1,4 +1,5 @@
 #include "dsp/Engine.h"
+#include "support/AperiodicMetrics.h"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -180,13 +181,14 @@ void branchMeasurements()
               << " recombination_complex_error=" << worstPhaseError << '\n';
 }
 
-std::vector<float> render(ironstack::Engine& engine, int samples, int block = 512)
+std::vector<float> render(ironstack::Engine& engine, int samples, int block = 512,
+                          ironstack::BassComponent component = ironstack::BassComponent::all)
 {
     std::vector<float> left(static_cast<std::size_t>(samples)), right(left.size());
     for (int offset = 0; offset < samples;)
     {
         const auto count = std::min(block, samples - offset);
-        engine.process(left.data() + offset, right.data() + offset, count, ironstack::LayerMask::bass);
+        engine.process(left.data() + offset, right.data() + offset, count, ironstack::LayerMask::bass, {}, component);
         offset += count;
     }
     require(left == right, "bass engine output is bit-exact L == R");
@@ -200,12 +202,12 @@ double pitch(ironstack::Engine& engine, double rate, bool subAudible = false)
     std::array<dsp_core::Butterworth, 4> analysisLowpass;
     for (auto& filter : analysisLowpass)
         filter.prepare(dsp_core::Butterworth::Type::lowpass, subAudible ? 20.0 : 70.0, rate);
-    const auto warmup = render(engine, static_cast<int>(rate / 2));
+    const auto warmup = render(engine, static_cast<int>(rate / 2),512,ironstack::BassComponent::clean);
     for (auto sample : warmup)
         for (auto& filter : analysisLowpass) sample = static_cast<float>(filter.next(sample));
-    auto audio = render(engine, static_cast<int>(rate));
-    // Strong grit adds crossings; isolate the 49-62 Hz (or sub-audible)
-    // fundamental in this measurement only, retaining the 0.01 Hz limit.
+    auto audio = render(engine, static_cast<int>(rate),512,ironstack::BassComponent::clean);
+    // Measure only the protected periodic branch; stochastic upper body has
+    // no measurable note period. Retain the original 0.01 Hz pitch limit.
     for (auto& sample : audio)
         for (auto& filter : analysisLowpass) sample = static_cast<float>(filter.next(sample));
     int crossings = 0;
@@ -403,55 +405,33 @@ void componentIsolation()
     require(parallelError < 1.0e-12, "independently driven dry and unison reconstruct parallel grit through bends/controls/releases");
     std::cout << "bass_component_reconstruction_error=" << worstError << " parallel_grit_error=" << parallelError << '\n';
 }
-void harmonicGritTexture()
+void diffuseGritBody()
 {
-    double lowestRms = 1.0, worstTextureRatio = 0.0;
-    for (const auto rate : {44100, 48000, 192000})
-        for (const auto root : {55.0, 110.0})
-            for (const auto amount : {0.0, 0.5, 1.0})
+    double lowestRms=1, worstCorrelation=0, worstLine=0;
+    for(const auto rate:{44100,48000,192000})
+        for(const auto root:{55.0,110.0,880.0})
+            for(const auto amount:{0.0,0.5,1.0})
             {
-                ironstack::BassExciter source; source.prepare(rate);
-                ironstack::BassVoice full, body;
-                for (auto* voice : {&full, &body})
+                ironstack::BassExciter source,replay;
+                source.prepare(rate); replay.prepare(rate);
+                ironstack::BassVoice body; body.prepare(rate); body.setParameters(140,amount); body.reset(); body.start(root,127);
+                std::vector<float> audio(static_cast<std::size_t>(rate)*3);
+                double rawEnergy=0;
+                for(std::size_t i=0;i<audio.size();++i)
                 {
-                    voice->prepare(rate); voice->setParameters(140, amount);
-                    voice->reset(); voice->start(root, 127);
+                    const auto raw=source.nextSources(root,rate,amount);
+                    require(raw.dry==raw.unison && raw.dry==replay.next(root,rate,amount),"whole diffuse body replays into both processing paths");
+                    rawEnergy+=raw.dry*raw.dry;
+                    audio[i]=static_cast<float>(body.next(1,ironstack::BassComponent::grit).output);
                 }
-                double bodyEnergy = 0.0, differenceEnergy = 0.0;
-                std::vector<double> driven;
-                driven.reserve(rate);
-                for (int i = 0; i < rate * 3 / 2; ++i)
-                {
-                    const auto parts = source.nextParts(root, rate, amount);
-                    const auto withTexture = full.next(1, ironstack::BassComponent::grit).output;
-                    const auto bodyOnly = body.next(1, ironstack::BassComponent::grit, &parts.body).output;
-                    require(std::isfinite(withTexture) && std::isfinite(bodyOnly), "harmonic grit remains finite");
-                    if (i < rate / 2) continue;
-                    bodyEnergy += bodyOnly * bodyOnly;
-                    differenceEnergy += (withTexture - bodyOnly) * (withTexture - bodyOnly);
-                    driven.push_back(withTexture);
-                }
-                const auto rms = std::sqrt(bodyEnergy / driven.size());
-                const auto ratio = std::sqrt(differenceEnergy / bodyEnergy);
-                lowestRms = std::min(lowestRms, rms);
-                worstTextureRatio = std::max(worstTextureRatio, ratio);
-                require(rms > 0.0005 && rms < 0.05, "main harmonic grit sustains independently of noise");
-                require(ratio > 0.0 && ratio < 0.0316227766, "texture contribution remains below -30 dB relative to body after drive");
-                const auto anchor = std::max(std::abs(coefficient(driven, 3 * root, rate)),
-                                             std::abs(coefficient(driven, 5 * root, rate)));
-                require(anchor > 0.3 * rms, "grit follows the played note through saturation-like overtones");
-                source.reset(); ironstack::BassExciter replay; replay.prepare(rate);
-                for (int i = 0; i < 4096; ++i)
-                    require(source.next(root, rate, amount) == replay.next(root, rate, amount), "harmonic/texture excitation resets exactly");
+                const auto rawRms=std::sqrt(rawEnergy/audio.size());
+                require(rawRms>0.07 && rawRms<0.14,"raw upper body is substantial rather than the old quiet texture");
+                const auto m=dsp_core::test::measureAperiodic(audio,rate,16384,root);
+                lowestRms=std::min(lowestRms,m.rms); worstCorrelation=std::max(worstCorrelation,m.correlation); worstLine=std::max(worstLine,m.persistentLine);
+                require(m.rms>0.002 && m.rms<0.05,"diffuse upper body survives the real parallel drive/cleanup");
+                require(m.correlation<0.40 && m.persistentLine<0.16,"processed upper body has no stable harmonic core");
             }
-    // A high-root source contains only partials below the fade boundary.
-    ironstack::BassExciter source; source.prepare(48000);
-    std::vector<double> high;
-    for (int i = 0; i < 48000; ++i) high.push_back(source.nextParts(5500, 48000, 1).body.dry);
-    require(std::abs(coefficient(high, 16500, 48000)) > 0.1, "permitted high harmonic remains");
-    require(std::abs(coefficient(high, 20500, 48000)) < 1.0e-10, "out-of-band fifth harmonic cannot fold into source");
-    std::cout << "bass_harmonic_min_body_rms=" << lowestRms << " max_post_drive_texture_dbr="
-              << 20.0 * std::log10(worstTextureRatio) << '\n';
+    std::cout<<"bass_diffuse_min_rms="<<lowestRms<<" max_correlation="<<worstCorrelation<<" max_persistent_line="<<worstLine<<'\n';
 }
 void injectedDriveAliasEvidence()
 {
@@ -499,6 +479,6 @@ int main()
     audibleRouting();
     drivenBassTests();
     componentIsolation();
-    harmonicGritTexture();
+    diffuseGritBody();
     injectedDriveAliasEvidence();
 }

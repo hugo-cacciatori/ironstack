@@ -83,7 +83,7 @@ public:
         velocity.setTarget(std::clamp(noteVelocity, 1, 127) / 127.0, transitionSamples);
     }
     // Optional excitation is a test-only linear/alias measurement seam.
-    // Ordinary rendering uses the harmonic body plus quiet coloured texture.
+    // Ordinary rendering uses the substantial diffuse upper body.
     Sample next(double bendRatio, BassComponent component = BassComponent::all,
                 const BassExciter::Sources* excitation = nullptr) noexcept
     {

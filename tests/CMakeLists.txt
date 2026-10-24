@@ -3,6 +3,12 @@ target_include_directories(ironstack_diffuse_source_tests PRIVATE "${CMAKE_SOURC
 target_link_libraries(ironstack_diffuse_source_tests PRIVATE ironstack_core)
 add_test(NAME diffuse_source_calibration COMMAND ironstack_diffuse_source_tests)
 
+add_executable(ironstack_diffuse_integration_tests DiffuseIntegrationTests.cpp)
+target_include_directories(ironstack_diffuse_integration_tests PRIVATE "${CMAKE_SOURCE_DIR}/shared/dsp-core/tests")
+target_link_libraries(ironstack_diffuse_integration_tests PRIVATE ironstack_core)
+add_test(NAME diffuse_integration COMMAND ironstack_diffuse_integration_tests)
+set_tests_properties(diffuse_integration PROPERTIES TIMEOUT 300)
+
 add_executable(ironstack_scaffold_tests ScaffoldTests.cpp)
 target_link_libraries(ironstack_scaffold_tests PRIVATE ironstack_core)
 add_test(NAME scaffold_silence COMMAND ironstack_scaffold_tests)
@@ -16,6 +22,7 @@ target_link_libraries(ironstack_layer_mode_tests PRIVATE ironstack_core)
 add_test(NAME layer_modes COMMAND ironstack_layer_mode_tests)
 
 add_executable(ironstack_bass_audio_tests BassAudioTests.cpp)
+target_include_directories(ironstack_bass_audio_tests PRIVATE "${CMAKE_SOURCE_DIR}/shared/dsp-core/tests")
 target_link_libraries(ironstack_bass_audio_tests PRIVATE ironstack_core)
 add_test(NAME bass_audio COMMAND ironstack_bass_audio_tests)
 
