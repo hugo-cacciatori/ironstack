@@ -43,7 +43,7 @@ public:
         g.setColour(getToggleState() ? juce::Colour(0xff292d33)
                                     : highlighted ? juce::Colour(0xff22262c) : juce::Colour(0xff1e2126));
         g.fillPath(tab);
-        g.setColour(juce::Colours::white.withAlpha(layerEnabled ? 0.95f : 0.55f));
+        g.setColour(juce::Colours::white.withAlpha(0.95f));
         g.setFont(juce::FontOptions(17.0f));
         g.drawFittedText(getButtonText(), iconWidth + 4, 0, getWidth() - iconWidth - 16, getHeight(),
                         juce::Justification::centredLeft, 1);
@@ -64,7 +64,6 @@ public:
             for (int row = 0; row < 3; ++row)
                 g.fillRoundedRectangle(10.0f + row * 3.0f, 14.0f + row * 7.0f, 20.0f - row * 6.0f, 3.0f, 1.5f);
         }
-        if (!layerEnabled) g.drawLine(9.0f, 36.0f, 30.0f, 9.0f, 2.0f);
         if (getToggleState()) { g.setColour(accent); g.fillRect(12, 0, getWidth() - 24, 2); }
         if (hasKeyboardFocus(true)) { g.setColour(juce::Colours::white); g.drawRect(getLocalBounds().reduced(3), 1); }
     }
