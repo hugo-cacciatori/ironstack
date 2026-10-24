@@ -1,3 +1,8 @@
+add_executable(ironstack_diffuse_source_tests DiffuseSourceTests.cpp)
+target_include_directories(ironstack_diffuse_source_tests PRIVATE "${CMAKE_SOURCE_DIR}/shared/dsp-core/tests")
+target_link_libraries(ironstack_diffuse_source_tests PRIVATE ironstack_core)
+add_test(NAME diffuse_source_calibration COMMAND ironstack_diffuse_source_tests)
+
 add_executable(ironstack_scaffold_tests ScaffoldTests.cpp)
 target_link_libraries(ironstack_scaffold_tests PRIVATE ironstack_core)
 add_test(NAME scaffold_silence COMMAND ironstack_scaffold_tests)
