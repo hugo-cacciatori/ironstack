@@ -403,56 +403,55 @@ void componentIsolation()
     require(parallelError < 1.0e-12, "independently driven dry and unison reconstruct parallel grit through bends/controls/releases");
     std::cout << "bass_component_reconstruction_error=" << worstError << " parallel_grit_error=" << parallelError << '\n';
 }
-void quietFoundationTexture()
+void harmonicGritTexture()
 {
-    double lowestRms = 1.0, worstTextureRatio = 0.0, worstHarmonicRatio = 0.0;
+    double lowestRms = 1.0, worstTextureRatio = 0.0;
     for (const auto rate : {44100, 48000, 192000})
         for (const auto root : {55.0, 110.0})
             for (const auto amount : {0.0, 0.5, 1.0})
             {
                 ironstack::BassExciter source; source.prepare(rate);
-                ironstack::BassVoice full, clean;
-                for (auto* voice : {&full, &clean})
+                ironstack::BassVoice full, body;
+                for (auto* voice : {&full, &body})
                 {
                     voice->prepare(rate); voice->setParameters(140, amount);
                     voice->reset(); voice->start(root, 127);
                 }
-                double cleanEnergy = 0.0, textureEnergy = 0.0;
+                double bodyEnergy = 0.0, differenceEnergy = 0.0;
                 std::vector<double> driven;
                 driven.reserve(rate);
                 for (int i = 0; i < rate * 3 / 2; ++i)
                 {
                     const auto parts = source.nextParts(root, rate, amount);
-                    require(parts.body.dry == 0.0 && parts.body.unison == 0.0, "pitched upper-grit body is absent");
                     const auto withTexture = full.next(1, ironstack::BassComponent::grit).output;
-                    const auto lowSine = clean.next(1, ironstack::BassComponent::clean).output;
-                    require(std::isfinite(withTexture) && std::isfinite(lowSine), "quiet texture and clean sine remain finite");
+                    const auto bodyOnly = body.next(1, ironstack::BassComponent::grit, &parts.body).output;
+                    require(std::isfinite(withTexture) && std::isfinite(bodyOnly), "harmonic grit remains finite");
                     if (i < rate / 2) continue;
-                    cleanEnergy += lowSine * lowSine;
-                    textureEnergy += withTexture * withTexture;
+                    bodyEnergy += bodyOnly * bodyOnly;
+                    differenceEnergy += (withTexture - bodyOnly) * (withTexture - bodyOnly);
                     driven.push_back(withTexture);
                 }
-                const auto rms = std::sqrt(textureEnergy / driven.size());
-                const auto ratio = std::sqrt(textureEnergy / cleanEnergy);
+                const auto rms = std::sqrt(bodyEnergy / driven.size());
+                const auto ratio = std::sqrt(differenceEnergy / bodyEnergy);
                 lowestRms = std::min(lowestRms, rms);
                 worstTextureRatio = std::max(worstTextureRatio, ratio);
-                require(rms > 1e-9, "quiet texture remains present while notes sustain");
-                require(ratio > 0.0 && ratio < 0.0316227766, "upper texture stays below -30 dB RMS relative to clean low sine");
+                require(rms > 0.0005 && rms < 0.05, "main harmonic grit sustains independently of noise");
+                require(ratio > 0.0 && ratio < 0.0316227766, "texture contribution remains below -30 dB relative to body after drive");
                 const auto anchor = std::max(std::abs(coefficient(driven, 3 * root, rate)),
                                              std::abs(coefficient(driven, 5 * root, rate)));
-                worstHarmonicRatio = std::max(worstHarmonicRatio, anchor / rms);
-                require(anchor < 0.3 * rms, "quiet texture has no dominant third/fifth-harmonic organ line");
+                require(anchor > 0.3 * rms, "grit follows the played note through saturation-like overtones");
                 source.reset(); ironstack::BassExciter replay; replay.prepare(rate);
                 for (int i = 0; i < 4096; ++i)
-                    require(source.next(root, rate, amount) == replay.next(root, rate, amount), "unpitched texture excitation resets exactly");
+                    require(source.next(root, rate, amount) == replay.next(root, rate, amount), "harmonic/texture excitation resets exactly");
             }
-    // The old note-linked body remains absent even at a high keyboard root.
+    // A high-root source contains only partials below the fade boundary.
     ironstack::BassExciter source; source.prepare(48000);
     std::vector<double> high;
     for (int i = 0; i < 48000; ++i) high.push_back(source.nextParts(5500, 48000, 1).body.dry);
-    require(std::all_of(high.begin(), high.end(), [](double value) { return value == 0.0; }), "no high-note pitched body can reappear or fold");
-    std::cout << "bass_quiet_texture_min_rms=" << lowestRms << " max_texture_vs_clean_db="
-              << 20.0 * std::log10(worstTextureRatio) << " max_harmonic_to_texture_rms=" << worstHarmonicRatio << '\n';
+    require(std::abs(coefficient(high, 16500, 48000)) > 0.1, "permitted high harmonic remains");
+    require(std::abs(coefficient(high, 20500, 48000)) < 1.0e-10, "out-of-band fifth harmonic cannot fold into source");
+    std::cout << "bass_harmonic_min_body_rms=" << lowestRms << " max_post_drive_texture_dbr="
+              << 20.0 * std::log10(worstTextureRatio) << '\n';
 }
 void injectedDriveAliasEvidence()
 {
@@ -500,6 +499,6 @@ int main()
     audibleRouting();
     drivenBassTests();
     componentIsolation();
-    quietFoundationTexture();
+    harmonicGritTexture();
     injectedDriveAliasEvidence();
 }
