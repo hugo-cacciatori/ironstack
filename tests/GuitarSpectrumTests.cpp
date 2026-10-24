@@ -49,6 +49,7 @@ struct ObservedBus
 {
     dsp_core::Butterworth tight, hp[2], lp;
     dsp_core::PeakingEq presence, preDriveContour;
+    dsp_core::EllipticHighpass guard;
     dsp_core::DriveChain4x drive;
     ObservedDrive observedDrive;
     dsp_core::FixedDelay<double, ironstack::GuitarBus::latencySamples> gate;
@@ -61,6 +62,7 @@ struct ObservedBus
         preDriveContour.prepare(2800.0, 3.0, 0.7, rate);
         hp[0].prepare(Type::highpass, ironstack::GuitarBus::separationHz, rate, 0.541196100146197);
         hp[1].prepare(Type::highpass, ironstack::GuitarBus::separationHz, rate, 1.306562964876377);
+        guard.prepare(ironstack::GuitarBus::separationHz, rate);
         presence.prepare(1800.0, 6.0, 0.7, rate);
         lp.prepare(Type::lowpass, ironstack::GuitarBus::finalLowpassHz, rate);
         drive.prepare(rate);
@@ -77,7 +79,7 @@ struct ObservedBus
         if (!std::isfinite(reconstructedDrive) || !std::isfinite(f[3]))
             throw std::runtime_error("nonfinite drive");
         error = std::max(error, std::abs(reconstructedDrive - f[3]));
-        f[4] = hp[1].next(hp[0].next(f[3]));
+        f[4] = guard.next(hp[1].next(hp[0].next(f[3])));
         f[5] = presence.next(f[4]);
         f[6] = lp.next(f[5]);
         const auto compensation = 1.0 / (1.0 + 0.8 * std::max(0.0, 4.0 * amount - 3.0));

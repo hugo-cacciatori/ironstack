@@ -5,6 +5,7 @@
 #include <dsp_core/FixedDelay.h>
 #include <dsp_core/DriveChain4x.h>
 #include <dsp_core/PeakingEq.h>
+#include <dsp_core/EllipticHighpass.h>
 #include "OutputLevel.h"
 
 namespace ironstack
@@ -32,6 +33,10 @@ public:
         // two identical sections (which would be Linkwitz-Riley).
         highpass[0].prepare(dsp_core::Butterworth::Type::highpass, separationHz, rate, 0.541196100146197);
         highpass[1].prepare(dsp_core::Butterworth::Type::highpass, separationHz, rate, 1.306562964876377);
+        // Broadband excitation (and its intermodulation) needs a deeper
+        // stopband. Keep the existing 350 Hz/24 dB filter and passband, adding
+        // suppression below 250 Hz rather than thinning the whole source.
+        lowBandGuard.prepare(separationHz, rate);
         // Bring the ensemble's upper-mid harmonics forward while rolling off
         // fizz. This shapes the dry voice without changing its hard envelope.
         presence.prepare(1800.0, 6.0, 0.7, rate);
@@ -42,6 +47,7 @@ public:
     {
         driveChain.reset(); tightFilter.reset(); lowpass.reset(); presence.reset(); preDriveContour.reset();
         for (auto& filter : highpass) filter.reset();
+        lowBandGuard.reset();
         tight.reset(tightTarget); drive.reset(driveTarget); currentCutoff = -1.0;
         alignedGate.reset(); alignedLevel.reset();
     }
@@ -69,6 +75,7 @@ public:
         // fold products out of the bass band and bound default chord steps.
         auto sample = driveChain.next(preDriveContour.next(tightFilter.next(input)), 0.85 * amount);
         for (auto& filter : highpass) sample = filter.next(sample);
+        sample = lowBandGuard.next(sample);
         // Full folding sharpens transitions. Trim only its upper-quarter range
         // using the already-smoothed drive; zero/default drive retain their gain.
         const auto foldDepth = std::max(0.0, 4.0 * amount - 3.0);
@@ -85,6 +92,7 @@ private:
     dsp_core::DriveChain4x driveChain;
     dsp_core::Butterworth tightFilter, highpass[2], lowpass;
     dsp_core::PeakingEq presence, preDriveContour;
+    dsp_core::EllipticHighpass lowBandGuard;
     dsp_core::LinearRamp tight, drive;
     dsp_core::FixedDelay<double, latencySamples> alignedGate, alignedLevel;
     double rate = 44100.0, tightTarget = 0.5, driveTarget = 0.5, currentCutoff = -1.0;
