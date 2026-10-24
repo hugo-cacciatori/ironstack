@@ -90,6 +90,30 @@ void layerLevels()
     }
 }
 
+void singleKeyFoundationParity()
+{
+    int cases = 0;
+    for (const double rate : {44100.0, 48000.0, 88200.0, 96000.0, 176400.0, 192000.0})
+    for (const int note : {0, 1, 12, 45, 57, 69, 81, 127})
+    {
+        Engine solo, both;
+        solo.setLayersEnabled(true, false); both.setLayersEnabled(true, true);
+        for (auto* engine : {&solo, &both}) { engine->prepare(rate); engine->noteOn(1, note, 127); }
+        forbidAllocation = true;
+        for (int i = 0; i < 8192; ++i)
+        {
+            if (i == 1024 || i == 5120) solo.setLayersEnabled(true, true);
+            if (i == 3072 || i == 7168) solo.setLayersEnabled(true, false);
+            require(solo.bassTarget().frequency == bassHz(note) && both.bassTarget().frequency == bassHz(note),
+                    "single held key stays exactly input minus12 in solo/Both and live Swarm toggles");
+            require(next(solo).bass == next(both).bass, "single-key Foundation waveform stays sample-exact across Swarm power changes");
+        }
+        forbidAllocation = false;
+        ++cases;
+    }
+    std::cout << "single_key_foundation_solo_both_parity=exact cases=" << cases << " frames_per_case=8192 octave_offset=-12\n";
+}
+
 void modeExamples()
 {
     for (const bool bass : {false, true}) for (const bool guitar : {false, true})
@@ -368,6 +392,7 @@ std::array<std::vector<float>, 2> sequence(double rate, int block, LayerMask mas
 
 int main()
 {
+    singleKeyFoundationParity();
     layerLevels();
     modeExamples(); heldReentry(); ownership(); allocationCheck();
     double worst = 0.0;

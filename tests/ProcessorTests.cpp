@@ -408,6 +408,36 @@ void routingBridgeTests()
     std::cout << "host_routing_matrix=48 rate/mode/Mono cases; live automation/held recall/page/reset/panic exact\n";
 }
 
+void singleKeyModeAudioTests()
+{
+    double worstError = 0.0;
+    for (const double rate : {44100.0, 48000.0, 192000.0})
+    for (const int note : {45, 57, 69, 81})
+    {
+        IronstackProcessor bass, swarm, both;
+        setToggle(bass, ironstack::parameters::guitarEnabled, false);
+        setToggle(swarm, ironstack::parameters::bassEnabled, false);
+        for (auto* processor : {&bass, &swarm, &both}) processor->prepareToPlay(rate, 512);
+        juce::AudioBuffer<float> b(2, 512), g(2, 512), mix(2, 512);
+        for (int block = 0; block < 16; ++block)
+        {
+            juce::MidiBuffer mb, mg, mm;
+            if (block == 0) mb.addEvent(juce::MidiMessage::noteOn(1, note, static_cast<juce::uint8>(127)), 0);
+            mg = mb; mm = mb;
+            if (block == 4 || block == 12)
+                for (auto* processor : {&swarm, &both}) setToggle(*processor, ironstack::parameters::guitarEnabled, false);
+            if (block == 8)
+                for (auto* processor : {&swarm, &both}) setToggle(*processor, ironstack::parameters::guitarEnabled, true);
+            bass.processBlock(b, mb); swarm.processBlock(g, mg); both.processBlock(mix, mm);
+            for (int channel = 0; channel < 2; ++channel) for (int i = 0; i < 512; ++i)
+                worstError = std::max(worstError, std::abs(static_cast<double>(mix.getSample(channel, i))
+                    - static_cast<double>(b.getSample(channel, i) + g.getSample(channel, i))));
+        }
+    }
+    require(worstError == 0.0, "actual plugin single-key Both output reconstructs solo Foundation plus Swarm through live power changes");
+    std::cout << "plugin_single_key_solo_both_reconstruction_error=" << worstError << " cases=12 octave_change=none_in_dsp\n";
+}
+
 void hiddenGainEditorParityTests()
 {
     IronstackProcessor reference, visible;
@@ -705,6 +735,7 @@ int main(int argc, char** argv)
     processorTests();
     headlessParityTests();
     routingBridgeTests();
+    singleKeyModeAudioTests();
     hiddenGainEditorParityTests();
     editorTests(argc > 1 ? juce::String(argv[1]) : juce::String{});
     keyboardTests();
