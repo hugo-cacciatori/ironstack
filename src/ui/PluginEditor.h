@@ -18,11 +18,11 @@ private:
     void timerCallback() override;
     void toggleLayer(const char* id);
     IronstackProcessor& owner;
-    juce::Label title, outputLabel, hoverHelp;
-    NumericKnob output;
+    juce::Label title, levelLabel, outputLabel, hoverHelp;
+    NumericKnob foundationLevel, swarmLevel, output;
     LayerTab foundationTab{"Foundation"}, swarmTab{"Swarm", true};
     juce::TextButton panic{"Panic"}, help{"Help"};
-    juce::AudioProcessorValueTreeState::SliderAttachment outputAttachment;
+    juce::AudioProcessorValueTreeState::SliderAttachment foundationAttachment, swarmAttachment, outputAttachment;
     juce::ScopedMessageBox aboutBox;
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(IronstackEditor)
 };

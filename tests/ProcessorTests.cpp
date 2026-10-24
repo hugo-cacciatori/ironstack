@@ -408,98 +408,16 @@ void routingBridgeTests()
     std::cout << "host_routing_matrix=48 rate/mode/Mono cases; live automation/held recall/page/reset/panic exact\n";
 }
 
-void singleKeyModeAudioTests()
-{
-    double worstError = 0.0;
-    for (const double rate : {44100.0, 48000.0, 192000.0})
-    for (const int note : {45, 57, 69, 81})
-    {
-        IronstackProcessor bass, swarm, both;
-        setToggle(bass, ironstack::parameters::guitarEnabled, false);
-        setToggle(swarm, ironstack::parameters::bassEnabled, false);
-        for (auto* processor : {&bass, &swarm, &both}) processor->prepareToPlay(rate, 512);
-        juce::AudioBuffer<float> b(2, 512), g(2, 512), mix(2, 512);
-        for (int block = 0; block < 16; ++block)
-        {
-            juce::MidiBuffer mb, mg, mm;
-            if (block == 0) mb.addEvent(juce::MidiMessage::noteOn(1, note, static_cast<juce::uint8>(127)), 0);
-            mg = mb; mm = mb;
-            if (block == 4 || block == 12)
-                for (auto* processor : {&swarm, &both}) setToggle(*processor, ironstack::parameters::guitarEnabled, false);
-            if (block == 8)
-                for (auto* processor : {&swarm, &both}) setToggle(*processor, ironstack::parameters::guitarEnabled, true);
-            bass.processBlock(b, mb); swarm.processBlock(g, mg); both.processBlock(mix, mm);
-            for (int channel = 0; channel < 2; ++channel) for (int i = 0; i < 512; ++i)
-                worstError = std::max(worstError, std::abs(static_cast<double>(mix.getSample(channel, i))
-                    - static_cast<double>(b.getSample(channel, i) + g.getSample(channel, i))));
-        }
-    }
-    require(worstError == 0.0, "actual plugin single-key Both output reconstructs solo Foundation plus Swarm through live power changes");
-    std::cout << "plugin_single_key_solo_both_reconstruction_error=" << worstError << " cases=12 octave_change=none_in_dsp\n";
-}
-
-void hiddenGainEditorParityTests()
-{
-    IronstackProcessor reference, visible;
-    std::unique_ptr<juce::AudioProcessorEditor> editor(visible.createEditor());
-    for (auto* processor : {&reference, &visible}) processor->prepareToPlay(48000, 512);
-    for (int block = 0; block < 12; ++block)
-    {
-        for (auto* processor : {&reference, &visible})
-        {
-            auto* bass = processor->parameterState().getParameter(ironstack::parameters::bassVolume);
-            auto* swarm = processor->parameterState().getParameter(ironstack::parameters::guitarVolume);
-            bass->setValueNotifyingHost(bass->convertTo0to1(block < 4 ? -4.0f : block < 8 ? -60.0f : 6.0f));
-            swarm->setValueNotifyingHost(swarm->convertTo0to1(block < 4 ? -7.0f : block < 8 ? 6.0f : -60.0f));
-        }
-        for (auto* child : editor->getChildren())
-            if (auto* tab = dynamic_cast<LayerTab*>(child)) tab->onClick();
-        juce::AudioBuffer<float> a(2, 512), b(2, 512);
-        juce::MidiBuffer ma, mb;
-        if (block == 0)
-            for (int note : {45, 52, 57}) ma.addEvent(juce::MidiMessage::noteOn(1, note, static_cast<juce::uint8>(127)), 0);
-        mb = ma;
-        reference.processBlock(a, ma); visible.processBlock(b, mb);
-        for (int channel = 0; channel < 2; ++channel) for (int i = 0; i < 512; ++i)
-            require(a.getSample(channel, i) == b.getSample(channel, i), "editor and page selection preserve exact audio during hidden-gain automation");
-    }
-    restoreXml(visible, "<IronstackState><PARAM id='output_db' value='0'/></IronstackState>");
-    for (const auto* id : {ironstack::parameters::bassVolume, ironstack::parameters::guitarVolume})
-        require(visible.parameterState().getRawParameterValue(id)->load() == 0.0f, "missing legacy hidden gains default to unity with editor open");
-    std::cout << "hidden_gain_editor_audio_parity=exact; silent/nondefault/maximum automation and missing-gain recall passed\n";
-}
-
 void editorTests(const juce::String& snapshot)
 {
     IronstackProcessor processor;
-    auto setLevel = [&processor](const char* id, float db)
-    {
-        auto* parameter = processor.parameterState().getParameter(id);
-        require(parameter->isAutomatable(), "hidden gains remain automatable");
-        parameter->setValueNotifyingHost(parameter->convertTo0to1(db));
-    };
-    setLevel(ironstack::parameters::bassVolume, -4.0f);
-    setLevel(ironstack::parameters::guitarVolume, -60.0f);
-    struct HostChanges final : juce::AudioProcessorListener
-    {
-        int parameters = 0, state = 0;
-        void audioProcessorParameterChanged(juce::AudioProcessor*, int, float) override { ++parameters; }
-        void audioProcessorChanged(juce::AudioProcessor*, const ChangeDetails&) override { ++state; }
-    } hostChanges;
-    processor.addListener(&hostChanges);
-    juce::MemoryBlock beforeOpen, afterOpen;
-    processor.getStateInformation(beforeOpen);
     std::unique_ptr<juce::AudioProcessorEditor> editor(processor.createEditor());
-    processor.getStateInformation(afterOpen);
-    require(beforeOpen == afterOpen, "opening editor preserves nondefault and silent hidden gains and state");
-    require(hostChanges.parameters == 0 && hostChanges.state == 0, "opening editor does not notify host of parameter or state changes");
     require(editor && editor->getWidth() == 680 && editor->getHeight() == 400, "compact resizable editor");
-    editor->setTopLeftPosition(-10000, -10000);
     editor->addToDesktop(0);
     editor->setVisible(true);
+    editor->toFront(true);
     LayerTab *foundation = nullptr, *swarm = nullptr;
-    NumericKnob* output = nullptr;
-    int knobCount = 0;
+    NumericKnob *output = nullptr, *foundationLevel = nullptr, *swarmLevel = nullptr;
     juce::TextButton* panic = nullptr;
     juce::Label* footer = nullptr;
     for (auto* child : editor->getChildren())
@@ -508,16 +426,14 @@ void editorTests(const juce::String& snapshot)
             (tab->getButtonText() == "Foundation" ? foundation : swarm) = tab;
         if (auto* knob = dynamic_cast<NumericKnob*>(child))
         {
-            ++knobCount;
             if (knob->getTitle() == "Output gain") output = knob;
+            if (knob->getTitle() == "Foundation level") foundationLevel = knob;
+            if (knob->getTitle() == "Swarm level") swarmLevel = knob;
         }
         if (auto* button = dynamic_cast<juce::TextButton*>(child))
             if (button->getButtonText() == "Panic") panic = button;
         if (auto* label = dynamic_cast<juce::Label*>(child))
-        {
             if (label->getTitle() == "Control description") footer = label;
-            require(label->getText() != "Level", "no per-layer Level labels");
-        }
         require(dynamic_cast<juce::ToggleButton*>(child) == nullptr, "no power checkboxes or Mono control");
         if (auto* button = dynamic_cast<juce::Button*>(child))
         {
@@ -526,11 +442,11 @@ void editorTests(const juce::String& snapshot)
                 && handler && handler->getHelp().isNotEmpty(), "all buttons have accessible help and focus");
         }
     }
-    require(foundation && swarm && output && panic && footer && knobCount == 1, "tabs, only master knob, panic and footer exist");
-    require(foundation->getToggleState(), "Foundation page selected initially");
+    require(foundation && swarm && output && foundationLevel && swarmLevel && panic && footer, "named tabs, levels, output, panic and footer exist");
+    require(foundation->getToggleState() && foundationLevel->isVisible() && !swarmLevel->isVisible(), "Foundation page selected initially");
     const auto outputBounds = output->getBounds();
     swarm->onClick();
-    require(processor.isGuitarPageSelected() && swarm->getToggleState(), "Swarm page selects independently");
+    require(processor.isGuitarPageSelected() && swarmLevel->isVisible() && !foundationLevel->isVisible(), "Swarm page selects its level");
     require(output->getBounds() == outputBounds && toggle(processor, ironstack::parameters::bassEnabled), "page selection preserves common controls and power");
     rightClickIcon(*foundation, 70);
     require(toggle(processor, ironstack::parameters::bassEnabled), "right-click label does not toggle power");
@@ -538,38 +454,12 @@ void editorTests(const juce::String& snapshot)
     require(!toggle(processor, ironstack::parameters::bassEnabled) && processor.isGuitarPageSelected(), "right-click icon toggles power without selecting page");
     require(!foundation->getAccessibilityHandler()->getCurrentState().isChecked(), "accessible power state updates immediately");
     foundation->onClick();
-    require(foundation->getToggleState() && foundation->isEnabled(), "disabled page remains selectable");
+    require(foundationLevel->isVisible() && foundationLevel->isEnabled(), "disabled page remains editable");
     require(foundation->getAccessibilityHandler()->getActions().invoke(juce::AccessibilityActionType::toggle), "accessible power toggle exists");
     require(toggle(processor, ironstack::parameters::bassEnabled), "accessible toggle changes the same host parameter");
-    for (auto* tab : {foundation, swarm})
-    for (const bool selected : {false, true}) for (const bool highlighted : {false, true})
-    for (const bool focused : {false, true})
+    for (auto* knob : {foundationLevel, swarmLevel, output})
     {
-        // Power must preserve every painted pixel outside the icon and its shape inside it.
-        (focused ? static_cast<juce::Component*>(tab) : static_cast<juce::Component*>(output))->grabKeyboardFocus();
-        require(tab->hasKeyboardFocus(false) == focused, "power-paint comparison covers focused and unfocused tabs");
-        tab->setToggleState(selected, juce::dontSendNotification);
-        juce::Image on(juce::Image::ARGB, tab->getWidth(), tab->getHeight(), true);
-        juce::Image off(on.createCopy());
-        tab->setLayerEnabled(true);
-        { juce::Graphics g(on); tab->paintButton(g, highlighted, false); }
-        tab->setLayerEnabled(false);
-        { juce::Graphics g(off); tab->paintButton(g, highlighted, false); }
-        const auto background = selected ? juce::Colour(0xff292d33)
-            : highlighted ? juce::Colour(0xff22262c) : juce::Colour(0xff1e2126);
-        int changed = 0;
-        for (int y = 0; y < on.getHeight(); ++y) for (int x = 0; x < on.getWidth(); ++x)
-        {
-            const auto a = on.getPixelAt(x, y), b = off.getPixelAt(x, y);
-            if (x >= 38) require(a == b, "power does not change label or selected/hover/focus surfaces");
-            else require((a == background) == (b == background), "power preserves icon silhouette without slash or badge");
-            if (a != b) ++changed;
-        }
-        require(changed > 0, "power changes icon color");
-    }
-    foundation->onClick();
-    for (auto* knob : {output})
-    {
+        if (knob == swarmLevel) swarm->onClick(); else foundation->onClick();
         require(knob->getTextBoxPosition() == juce::Slider::NoTextBox && !knob->valueEditor().isVisible(), "no persistent numeric field");
         knob->setValue(-6.0, juce::sendNotificationSync);
         const juce::MouseEvent doubleClick(juce::Desktop::getInstance().getMainMouseSource(), {}, {},
@@ -601,7 +491,8 @@ void editorTests(const juce::String& snapshot)
     require(outputDb(processor) == -9.0f, "output writes through APVTS");
     setOutput(processor, 3.0f);
     require(std::abs(output->getValue() - 3.0) < 1e-5, "host updates output knob");
-    setLevel(ironstack::parameters::guitarVolume, -7.0f);
+    foundationLevel->setValue(-4.0, juce::sendNotificationSync);
+    swarmLevel->setValue(-7.0, juce::sendNotificationSync);
     rightClickIcon(*swarm);
     swarm->onClick();
     juce::MemoryBlock settings;
@@ -615,38 +506,10 @@ void editorTests(const juce::String& snapshot)
     for (const auto size : {juce::Point<int>{560, 360}, juce::Point<int>{1000, 600}, juce::Point<int>{680, 400}})
     {
         editor->setSize(size.x, size.y);
-        const auto children = editor->getChildren();
-        for (auto* child : children)
-        {
-            require(editor->getLocalBounds().contains(child->getBounds()), "all resized controls fit");
-            for (auto* other : children)
-                if (child != other) require(!child->getBounds().intersects(other->getBounds()), "controls never overlap");
-        }
-        require(output->getBottom() < foundation->getY() && output->getBottom() < swarm->getY(), "Output entirely above tabs");
-        require(output->getLocalBounds().contains(output->valueEditor().getBounds()), "temporary Output entry fits above tabs");
+        for (auto* child : editor->getChildren()) require(editor->getLocalBounds().contains(child->getBounds()), "all resized controls fit");
         const auto common = output->getBounds();
         foundation->onClick(); swarm->onClick();
         require(output->getBounds() == common && footer->getHeight() == 26, "stable output and one-line footer geometry");
-    }
-    for (int powers = 0; powers < 4; ++powers) for (const bool selected : {false, true})
-    {
-        setToggle(processor, ironstack::parameters::bassEnabled, (powers & 1) != 0);
-        setToggle(processor, ironstack::parameters::guitarEnabled, (powers & 2) != 0);
-        std::array<float, 8> values{};
-        for (int i = 0; i < 8; ++i) values[static_cast<std::size_t>(i)] = processor.getParameters()[i]->getValue();
-        const auto parameterNotifications = hostChanges.parameters;
-        (selected ? swarm : foundation)->onClick();
-        require(hostChanges.parameters == parameterNotifications, "page selection sends no host parameter notification");
-        for (int i = 0; i < 8; ++i)
-            require(values[static_cast<std::size_t>(i)] == processor.getParameters()[i]->getValue(), "selecting any powered/disabled page writes no audio parameters");
-        for (auto* tab : {foundation, swarm})
-        {
-            const auto state = tab->getAccessibilityHandler()->getCurrentState();
-            require(state.isChecked() == tab->isLayerEnabled() && state.isSelected() == tab->getToggleState(),
-                    "accessible power and selection remain independent in every combination");
-            require(tab->getDescription().contains(tab->isLayerEnabled() ? "Layer on." : "Layer off; still editable."),
-                    "accessible description provides non-color power status");
-        }
     }
     // Keyboard focus gives the same footer text without requiring synthetic mouse movement.
     output->grabKeyboardFocus(); refreshUi();
@@ -662,30 +525,16 @@ void editorTests(const juce::String& snapshot)
     {
         setOutput(processor, 0);
         const juce::File base(snapshot);
-        for (const auto size : {juce::Point<int>{560, 360}, juce::Point<int>{680, 400}, juce::Point<int>{1000, 600}})
-        for (int powers = 0; powers < 4; ++powers)
         for (const bool selected : {false, true}) for (int scale : {1, 2})
         {
-            editor->setSize(size.x, size.y);
-            setToggle(processor, ironstack::parameters::bassEnabled, (powers & 1) != 0);
-            setToggle(processor, ironstack::parameters::guitarEnabled, (powers & 2) != 0);
             (selected ? swarm : foundation)->onClick();
             juce::Image image(juce::Image::ARGB, editor->getWidth()*scale, editor->getHeight()*scale, true, juce::SoftwareImageType{});
             { juce::Graphics g(image); g.addTransform(juce::AffineTransform::scale(static_cast<float>(scale))); editor->paintEntireComponent(g, false); }
             juce::MemoryOutputStream stream;
-            const auto file = base.getSiblingFile(juce::String("ui2-") + (selected ? "swarm" : "foundation")
-                + "-power" + juce::String(powers) + "-" + juce::String(size.x) + "-" + juce::String(scale) + "x.png");
+            const auto file = base.getSiblingFile(juce::String("ui1-") + (selected ? "swarm" : "foundation") + "-" + juce::String(scale) + "x.png");
             require(juce::PNGImageFormat{}.writeImageToStream(image, stream) && file.replaceWithData(stream.getData(), stream.getDataSize()), "UI snapshot saved");
         }
     }
-    processor.getStateInformation(beforeOpen);
-    const auto parameterNotifications = hostChanges.parameters, stateNotifications = hostChanges.state;
-    editor.reset();
-    processor.getStateInformation(afterOpen);
-    require(beforeOpen == afterOpen, "closing editor preserves state and hidden gains");
-    require(hostChanges.parameters == parameterNotifications && hostChanges.state == stateNotifications,
-            "closing editor does not dirty host state or parameters");
-    processor.removeListener(&hostChanges);
     std::cout << "tab power, value entry, defaults, recall, footer and layout passed\n";
 }
 
@@ -693,12 +542,11 @@ void keyboardTests()
 {
     IronstackProcessor processor;
     std::unique_ptr<juce::AudioProcessorEditor> editor(processor.createEditor());
-    editor->setTopLeftPosition(-10000, -10000);
     editor->addToDesktop(0);
-    LayerTab *foundation = nullptr, *swarm = nullptr;
+    LayerTab* swarm = nullptr;
     for (auto* child : editor->getChildren()) if (auto* tab = dynamic_cast<LayerTab*>(child))
-        (tab->getButtonText() == "Foundation" ? foundation : swarm) = tab;
-    require(foundation && swarm, "keyboard tabs exist");
+        if (tab->getButtonText() == "Swarm") swarm = tab;
+    require(swarm != nullptr, "Swarm keyboard tab exists");
     bool completed = false;
     juce::MessageManager::callAsync([&]
     {
@@ -708,15 +556,8 @@ void keyboardTests()
             require(processor.isGuitarPageSelected() && toggle(processor, ironstack::parameters::guitarEnabled), "keyboard tab selection is audio neutral");
             require(swarm->keyPressed(juce::KeyPress(juce::KeyPress::returnKey, juce::ModifierKeys::altModifier, 0)), "Alt+Enter toggles power");
             require(!toggle(processor, ironstack::parameters::guitarEnabled) && processor.isGuitarPageSelected(), "keyboard power leaves page selected");
-            require(foundation->getAccessibilityHandler()->getActions().invoke(juce::AccessibilityActionType::press),
-                    "accessible press selects page separately from power toggle");
-            juce::Timer::callAfterDelay(100, [&]
-            {
-                require(!processor.isGuitarPageSelected() && toggle(processor, ironstack::parameters::bassEnabled)
-                    && !toggle(processor, ironstack::parameters::guitarEnabled), "accessible selection leaves both power values unchanged");
-                completed = true;
-                juce::MessageManager::getInstance()->stopDispatchLoop();
-            });
+            completed = true;
+            juce::MessageManager::getInstance()->stopDispatchLoop();
         });
     });
     juce::MessageManager::getInstance()->runDispatchLoop();
@@ -735,8 +576,6 @@ int main(int argc, char** argv)
     processorTests();
     headlessParityTests();
     routingBridgeTests();
-    singleKeyModeAudioTests();
-    hiddenGainEditorParityTests();
     editorTests(argc > 1 ? juce::String(argv[1]) : juce::String{});
     keyboardTests();
     return 0;

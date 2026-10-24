@@ -58,8 +58,6 @@ The default build downloads the commit archive and verifies its SHA-256. `-JuceS
 
 Outputs: `build/windows-release/Ironstack_artefacts/Release/Standalone/Ironstack.exe` and `build/windows-release/Ironstack_artefacts/Release/VST3/Ironstack.vst3/`. CTest covers idle/buffer, oscillator/MIDI and processor/editor/state checks. Standard-sequence rendering starts in M2. Pluginval strictness 5 has passed; DAW listening and a verified milestone release remain later gates. No version bump/release is due for this partial milestone.
 
-For controlled drive diagnostics, build target `alias_tool` in the same developer environment, then run `build/windows-release/alias_tool.exe`. It writes JSON to stdout and no audio files; exit0 means measurement completed, not alias acceptance. Use `--help` for scope.
-
 ## M1.2 verification — 2026-10-19
 
 - The offline-source command above completed the Windows x64 Release build and CTest 1/1; final incremental rebuild/CTest also passed. The generated VST3 manifest identifies Ironstack 0.1.0, VST 3.8.0, Instrument/Synth. No pluginval or DAW acceptance is claimed.

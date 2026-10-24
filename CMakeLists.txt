@@ -29,12 +29,6 @@ target_link_libraries(benchmark_tool PRIVATE ironstack_core juce::juce_audio_bas
     juce::juce_recommended_config_flags juce::juce_recommended_warning_flags)
 target_compile_definitions(benchmark_tool PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0)
 
-add_executable(alias_tool tools/alias_tool/main.cpp)
-target_include_directories(alias_tool PRIVATE "${CMAKE_SOURCE_DIR}/shared/dsp-core/tests")
-target_link_libraries(alias_tool PRIVATE ironstack_core juce::juce_audio_basics
-    juce::juce_recommended_config_flags juce::juce_recommended_warning_flags)
-target_compile_definitions(alias_tool PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0)
-
 juce_add_plugin(Ironstack
     COMPANY_NAME "Hugo Cacciatori"
     BUNDLE_ID "com.hugocacciatori.ironstack"
@@ -110,9 +104,6 @@ endif()
 
 # Render evidence identifies the same configured source as package metadata.
 target_compile_definitions(render_tool PRIVATE
-    IRONSTACK_COMMIT="${IRONSTACK_CONFIGURED_COMMIT}"
-    IRONSTACK_DIRTY=${IRONSTACK_CONFIGURED_DIRTY})
-target_compile_definitions(alias_tool PRIVATE
     IRONSTACK_COMMIT="${IRONSTACK_CONFIGURED_COMMIT}"
     IRONSTACK_DIRTY=${IRONSTACK_CONFIGURED_DIRTY})
 # Packaging consumes JUCE's actual bundle paths, including .app on macOS.
